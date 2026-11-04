@@ -28,7 +28,7 @@ export function CratePanel({ index, onHover, onPlay }: Props) {
         </nav>
       </header>
 
-      <section className="cp-current" aria-live="polite">
+      <section key={index} className="cp-current swap" aria-live="polite">
         <div className="cp-code-row">
           <span className="serif cp-code">{code}</span>
           <span className="cp-eyebrow">{SIDE_NAMES[p.side]} · {p.year}</span>

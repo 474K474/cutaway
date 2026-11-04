@@ -426,6 +426,26 @@ function Divider({ hovered }: { hovered: number }) {
   );
 }
 
+// ---------- Камера ----------
+
+const CAM_REST = { pos: new THREE.Vector3(0.02, 0.88, 1.3), look: new THREE.Vector3(0, 0.3, 0) };
+const CAM_UP = { pos: new THREE.Vector3(0.05, 1.12, 1.12), look: new THREE.Vector3(0.02, 0.86, -0.05) };
+
+/** Камера провожает пластинку вверх, когда её достают, и опускается обратно при возвращении. */
+function CameraRig({ gone }: { gone: boolean }) {
+  const { camera } = useThree();
+  const k = useRef(gone ? 1 : 0);
+  const look = useMemo(() => new THREE.Vector3(), []);
+  useFrame((_, dt) => {
+    k.current = damp(k.current, gone ? 1 : 0, gone ? 2.6 : 1.9, dt);
+    const e = k.current * k.current * (3 - 2 * k.current);
+    camera.position.lerpVectors(CAM_REST.pos, CAM_UP.pos, e);
+    look.lerpVectors(CAM_REST.look, CAM_UP.look, e);
+    camera.lookAt(look);
+  });
+  return null;
+}
+
 // ---------- Сцена ----------
 
 type Projector = (clientX: number) => { best: number; bestD: number; dists: number[] };
@@ -470,6 +490,7 @@ function SceneContent({ hovered, gone, level, projector }: { hovered: number; go
     <>
       <color attach="background" args={['#0d0907']} />
       <fog attach="fog" args={['#0d0907', 2.4, 5]} />
+      <CameraRig gone={gone} />
       <Lights level={level} />
       <Room covers={covers} />
       <group ref={crate} rotation-y={CRATE_YAW}>

@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import type { Project } from '../data/projects';
 import { drawCover } from './drawCover';
-import { rng, toTexture, vinylRoughness, vinylTexture } from './textures';
+import { decalTexture, plankTexture, rng, toTexture, vinylRoughness, vinylTexture } from './textures';
 
 interface Props {
   project: Project;
@@ -88,6 +88,21 @@ function feltTexture() {
   return toTexture(cv);
 }
 
+/** Светлая гравировка на корпусе. */
+function Engrave({ text, x, z, w }: { text: string; x: number; z: number; w: number }) {
+  const tex = useMemo(
+    () => decalTexture([text], { w: 512, h: 96, font: '600 62px Onest, sans-serif', color: 'rgba(205,195,180,.62)', spacing: 8 }),
+    [text],
+  );
+  const aspect = 96 / 512;
+  return (
+    <mesh position={[x, 0.0006, z]} rotation-x={-Math.PI / 2}>
+      <planeGeometry args={[w * 1.25, w * 1.25 * aspect]} />
+      <meshBasicMaterial map={tex} transparent depthWrite={false} toneMapped={false} />
+    </mesh>
+  );
+}
+
 // ---------- Свет ----------
 
 function Lights() {
@@ -124,6 +139,8 @@ function Lights() {
       />
       <hemisphereLight args={['#ffe0c0', '#120a05', 0.18]} />
       <pointLight position={[0.6, 0.5, -0.4]} intensity={0.5} color="#ff9d5c" decay={2} />
+      {/* Тёплый блик лампы на виниле: неподвижный, а бороздки бегут под ним */}
+      <pointLight position={[0.03, 0.22, -0.06]} intensity={0.09} distance={0.32} color="#fff0d8" decay={2} />
     </>
   );
 }
@@ -134,6 +151,7 @@ function Turntable({ project, code, leaving }: Props) {
   const brushed = useMemo(() => brushedTexture(), []);
   const strobe = useMemo(() => strobeTexture(), []);
   const felt = useMemo(() => feltTexture(), []);
+  const walnut = useMemo(() => plankTexture(2), []);
   const cover = useMemo(() => drawCover(project, code, 1024), [project, code]);
   const vinyl = useMemo(() => vinylTexture(cover), [cover]);
   const vRough = useMemo(() => vinylRoughness(), []);
@@ -147,7 +165,14 @@ function Turntable({ project, code, leaving }: Props) {
     new THREE.MeshStandardMaterial({ color: '#888', metalness: 1, roughness: 0.4 }),
   ], [strobe]);
   const recordMats = useMemo(() => {
-    const face = new THREE.MeshPhysicalMaterial({ map: vinyl, roughnessMap: vRough, roughness: 1, clearcoat: 0.7, clearcoatRoughness: 0.22 });
+    // Лак только на виниле: бумажная этикетка остаётся матовой.
+    const cc = document.createElement('canvas');
+    cc.width = cc.height = 256;
+    const cx = cc.getContext('2d')!;
+    cx.fillStyle = '#fff'; cx.fillRect(0, 0, 256, 256);
+    cx.fillStyle = '#000'; cx.beginPath(); cx.arc(128, 128, 128 * 0.345, 0, Math.PI * 2); cx.fill();
+    const ccMap = toTexture(cc, { srgb: false });
+    const face = new THREE.MeshPhysicalMaterial({ map: vinyl, roughnessMap: vRough, roughness: 1, clearcoat: 0.7, clearcoatMap: ccMap, clearcoatRoughness: 0.22 });
     return [new THREE.MeshStandardMaterial({ color: '#0e0e0e', roughness: 0.35 }), face, face];
   }, [vinyl, vRough]);
 
@@ -220,11 +245,38 @@ function Turntable({ project, code, leaving }: Props) {
 
   return (
     <group>
-      {/* Плинт */}
-      <mesh position={[0.1, -0.03, 0]} receiveShadow>
-        <boxGeometry args={[1.0, 0.06, 1.1]} />
+      {/* Плинт с ореховой боковиной */}
+      <mesh position={[-0.0825, -0.03, 0]} receiveShadow>
+        <boxGeometry args={[0.835, 0.06, 1.1]} />
         <meshStandardMaterial map={brushed} metalness={0.25} roughness={0.62} />
       </mesh>
+      <mesh position={[0.346, -0.026, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.022, 0.07, 1.1]} />
+        <meshStandardMaterial map={walnut} color="#5c4434" roughness={0.55} />
+      </mesh>
+
+      {/* Петли пылезащитной крышки */}
+      {[0.05, 0.27].map((x) => (
+        <group key={x} position={[x, 0, -0.228]}>
+          <mesh position={[0, 0.006, 0]} castShadow material={darkMetal}>
+            <boxGeometry args={[0.044, 0.012, 0.016]} />
+          </mesh>
+          <mesh position={[0, 0.013, 0]} rotation-z={Math.PI / 2} castShadow material={chrome}>
+            <cylinderGeometry args={[0.003, 0.003, 0.046, 16]} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* Гравировки */}
+      <Engrave text="M.S. · SL-01" x={0.13} z={-0.205} w={0.07} />
+      <Engrave text="ANTI-SKATE" x={PIVOT[0] + 0.062} z={PIVOT[1] - 0.058} w={0.034} />
+      <Engrave text="START · STOP" x={0.2} z={0.222} w={0.04} />
+      <Engrave text="33" x={0.25} z={0.217} w={0.016} />
+      <Engrave text="45" x={0.275} z={0.217} w={0.016} />
+      <Engrave text="45 RPM" x={0.27} z={0.122} w={0.03} />
+      <Engrave text="+8" x={0.306} z={-0.092} w={0.01} />
+      <Engrave text="−8" x={0.306} z={0.032} w={0.01} />
+      <Engrave text="PITCH" x={0.29} z={0.048} w={0.026} />
 
       {/* Платтер, мат, шпиндель */}
       <mesh position={[0, PLATTER_TOP / 2, 0]} castShadow receiveShadow material={platterMats}>
@@ -319,19 +371,19 @@ function Turntable({ project, code, leaving }: Props) {
       </mesh>
 
       {/* Адаптер 45 */}
-      <mesh position={[0.29, 0.004, 0.09]} castShadow receiveShadow material={chrome}>
+      <mesh position={[0.27, 0.004, 0.09]} castShadow receiveShadow material={chrome}>
         <cylinderGeometry args={[0.019, 0.019, 0.008, 48]} />
       </mesh>
 
       {/* Питч-фейдер */}
-      <mesh position={[0.31, 0.0005, -0.03]} receiveShadow>
+      <mesh position={[0.29, 0.0005, -0.03]} receiveShadow>
         <boxGeometry args={[0.012, 0.002, 0.12]} />
         <meshStandardMaterial color="#060606" roughness={0.9} />
       </mesh>
-      <mesh position={[0.31, 0.006, -0.03]} castShadow material={blackPlastic}>
+      <mesh position={[0.29, 0.006, -0.03]} castShadow material={blackPlastic}>
         <boxGeometry args={[0.024, 0.01, 0.014]} />
       </mesh>
-      <mesh position={[0.31, 0.0115, -0.03]}>
+      <mesh position={[0.29, 0.0115, -0.03]}>
         <boxGeometry args={[0.018, 0.0006, 0.0015]} />
         <meshStandardMaterial color="#e0452c" emissive="#e0452c" emissiveIntensity={0.6} />
       </mesh>

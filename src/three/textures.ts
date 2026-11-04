@@ -202,7 +202,7 @@ export function vinylRoughness() {
     ctx.strokeStyle = Math.floor(r / 1.2) % 2 ? '#6e6e6e' : '#3c3c3c';
     ctx.beginPath(); ctx.arc(C, C, r, 0, Math.PI * 2); ctx.stroke();
   }
-  ctx.fillStyle = '#b0b0b0';
+  ctx.fillStyle = '#f2f2f2';
   ctx.beginPath(); ctx.arc(C, C, C * 0.335, 0, Math.PI * 2); ctx.fill();
   return toTexture(cv, { srgb: false });
 }

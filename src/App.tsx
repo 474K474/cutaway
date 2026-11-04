@@ -8,14 +8,13 @@ import { useLightFlicker } from './hooks/useLightFlicker';
 import { use3D } from './three/support';
 
 // 3D-сцена грузится отдельным чанком; без WebGL остаётся CSS-версия ящика.
-
 const CrateScene3D = lazy(() => import('./three/CrateScene3D'));
-
 
 type View = 'crate' | 'player';
 
-const PULL_MS = 850; // пластинка уезжает из ящика вверх
+const PULL_MS = 1150; // пластинка уезжает из ящика вверх, камера провожает её
 const LEAVE_MS = 2800; // игла уходит, диск тормозит, пластинку снимают
+const FADE_MS = 420; // растворение экрана перед сменой сцены
 const n = projects.length;
 const wrap = (i: number) => ((i % n) + n) % n;
 
@@ -27,6 +26,7 @@ export default function App() {
   const [returning, setReturning] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [playKey, setPlayKey] = useState(0);
+  const [exiting, setExiting] = useState(false);
   const light = useLightFlicker();
 
   const timers = useRef<number[]>([]);
@@ -54,7 +54,9 @@ export default function App() {
     setHovered(i);
     setIndex(i);
     setPulling(true);
+    later(() => setExiting(true), PULL_MS - FADE_MS);
     later(() => {
+      setExiting(false);
       setPulling(false);
       setHovered(-1);
       setPlayKey((k) => k + 1);
@@ -66,7 +68,9 @@ export default function App() {
   const back = () => {
     if (leaving) return;
     setLeaving(true);
+    later(() => setExiting(true), LEAVE_MS - FADE_MS);
     later(() => {
+      setExiting(false);
       setLeaving(false);
       setView('crate');
       // Пластинка опускается обратно в ящик сверху.
@@ -85,7 +89,7 @@ export default function App() {
     <>
       <SvgDefs />
       {view === 'crate' ? (
-        <main className="crate-layout fade-in">
+        <main className={`crate-layout view-in${exiting ? ' view-out' : ''}`}>
           {use3D ? (
             <Suspense fallback={<div className="stage" />}>
               <CrateScene3D hovered={hovered} pulling={pulling} returning={returning} light={light} onHover={hover} onPick={play} />
@@ -96,7 +100,7 @@ export default function App() {
           <CratePanel index={index} onHover={hover} onPlay={play} />
         </main>
       ) : (
-        <main>
+        <main className={`view-in${exiting ? ' view-out' : ''}`}>
           <Player
             key={playKey}
             project={projects[index]}
