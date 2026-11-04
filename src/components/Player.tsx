@@ -39,6 +39,7 @@ function currentAngle(el: HTMLElement | null): number {
 export function Player({ project: p, code, nextTitle, leaving, onBack, onPrev, onNext }: Props) {
   const [side, setSide] = useState<Side>('a');
   const [stopAngle, setStopAngle] = useState(0);
+  const [motor, setMotor] = useState(!use3D);
   const spinRef = useRef<HTMLDivElement>(null);
 
   const back = () => {
@@ -55,7 +56,7 @@ export function Player({ project: p, code, nextTitle, leaving, onBack, onPrev, o
       <div className={use3D ? 'deck deck-3d' : 'deck'}>
         {use3D ? (
           <Suspense fallback={null}>
-            <Player3D project={p} code={code} leaving={leaving} />
+            <Player3D project={p} code={code} leaving={leaving} onMotor={setMotor} />
           </Suspense>
         ) : (
           <>
@@ -118,8 +119,8 @@ export function Player({ project: p, code, nextTitle, leaving, onBack, onPrev, o
           <div className="panel-top">
             <button className="btn" onClick={back}><ArrowLeft />Обратно в ящик</button>
             <span className="now-playing">
-              <span className={L ? 'eq off' : 'eq'} aria-hidden="true"><span /><span /><span /></span>
-              Сейчас играет · {code}
+              <span className={L || !motor ? 'eq off' : 'eq'} aria-hidden="true"><span /><span /><span /></span>
+              {motor || !use3D ? 'Сейчас играет' : 'Пауза'} · {code}
             </span>
           </div>
 
