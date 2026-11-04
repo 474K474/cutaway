@@ -1,0 +1,47 @@
+.cover {
+  position: relative;
+  width: 100em;
+  height: 100em;
+  overflow: hidden;
+  font-family: 'Oswald', sans-serif;
+  text-transform: uppercase;
+  text-align: left;
+}
+.cv-abs { position: absolute; }
+.cv-word {
+  position: absolute;
+  font-weight: 700;
+  line-height: 0.84;
+  letter-spacing: -0.01em;
+  white-space: pre-line;
+}
+.cv-tag {
+  position: absolute;
+  font-weight: 700;
+  line-height: 0.95;
+  white-space: pre-line;
+}
+.cv-meta {
+  position: absolute;
+  display: flex;
+  justify-content: space-between;
+  font-family: 'Onest', sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+.cv-center { left: 0; right: 0; justify-content: center; text-align: center; }
+.cv-grain {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+  opacity: 0.5;
+}
+.cv-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 6em rgba(0, 0, 0, 0.35);
+}
