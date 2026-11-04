@@ -1,9 +1,12 @@
-import { useRef, useState } from 'react';
+import { Suspense, lazy, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { Project } from '../data/projects';
 import { Cover } from './Cover';
 import { ArrowLeft, ArrowRight, GithubIcon } from './icons';
+import { use3D } from '../three/support';
 import './Player.css';
+
+const Player3D = lazy(() => import('../three/Player3D'));
 
 interface Props {
   project: Project;
@@ -49,7 +52,13 @@ export function Player({ project: p, code, nextTitle, leaving, onBack, onPrev, o
 
   return (
     <div className="player">
-      <div className="deck">
+      <div className={use3D ? 'deck deck-3d' : 'deck'}>
+        {use3D ? (
+          <Suspense fallback={null}>
+            <Player3D project={p} code={code} leaving={leaving} />
+          </Suspense>
+        ) : (
+          <>
         <div className="deck-inner">
           <div className="platter" aria-hidden="true" />
           <div className="platter-strobe" aria-hidden="true" />
@@ -100,8 +109,9 @@ export function Player({ project: p, code, nextTitle, leaving, onBack, onPrev, o
           </div>
         </div>
         <div className="deck-wood" aria-hidden="true" />
+          </>
+        )}
       </div>
-
       <div className="panel-wrap">
         <div className="panel-glow" aria-hidden="true" style={{ background: `radial-gradient(ellipse at center, ${p.cover.bg}, transparent 65%)` }} />
         <div className={L ? 'panel panel-out' : 'panel'}>

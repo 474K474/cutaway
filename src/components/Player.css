@@ -170,3 +170,8 @@
   .spin, .spin-down, .disc-in, .disc-out, .arm-drop, .arm-up, .cue-down, .cue-up, .panel-sleeve, .eq span { animation: none; }
   .arm-drop { transform: rotate(44deg); }
 }
+
+/* 3D-дека: canvas на всю колонку */
+.deck-3d { background: #0f0d0c; }
+.deck-3d canvas { position: absolute !important; inset: 0; display: block; }
+.deck-3d > div { position: absolute !important; inset: 0; }

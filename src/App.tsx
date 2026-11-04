@@ -5,18 +5,12 @@ import { CratePanel } from './components/CratePanel';
 import { Player } from './components/Player';
 import { SvgDefs } from './components/SvgDefs';
 import { useLightFlicker } from './hooks/useLightFlicker';
+import { use3D } from './three/support';
 
 // 3D-сцена грузится отдельным чанком; без WebGL остаётся CSS-версия ящика.
+
 const CrateScene3D = lazy(() => import('./three/CrateScene3D'));
-const hasWebGL = (() => {
-  try {
-    const c = document.createElement('canvas');
-    return !!(c.getContext('webgl2') || c.getContext('webgl'));
-  } catch {
-    return false;
-  }
-})();
-const use3D = hasWebGL && !new URLSearchParams(window.location.search).has('css');
+
 
 type View = 'crate' | 'player';
 
@@ -40,6 +34,12 @@ export default function App() {
     timers.current.push(window.setTimeout(fn, ms));
   }, []);
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
+  // Заранее подгружаем 3D-проигрыватель, чтобы он появлялся без паузы.
+  useEffect(() => {
+    if (!use3D) return;
+    const id = window.setTimeout(() => { import('./three/Player3D'); }, 3000);
+    return () => window.clearTimeout(id);
+  }, []);
 
   const busy = pulling || returning || leaving;
 

@@ -257,20 +257,39 @@ function Plank({ size, position, tex }: { size: [number, number, number]; positi
   );
 }
 
+/** Верхняя торцевая доска со сквозным вырезом-ручкой. */
+function HandlePlank({ width, position, tex }: { width: number; position: [number, number, number]; tex: THREE.Texture }) {
+  const geo = useMemo(() => {
+    const w = width / 2, h = PLANK_H / 2;
+    const shape = new THREE.Shape();
+    shape.moveTo(-w, -h); shape.lineTo(w, -h); shape.lineTo(w, h); shape.lineTo(-w, h); shape.closePath();
+    const hw = 0.06, hh = 0.016, r = hh;
+    const hole = new THREE.Path();
+    hole.moveTo(-hw + r, -hh);
+    hole.lineTo(hw - r, -hh);
+    hole.absarc(hw - r, 0, r, -Math.PI / 2, Math.PI / 2, false);
+    hole.lineTo(-hw + r, hh);
+    hole.absarc(-hw + r, 0, r, Math.PI / 2, Math.PI * 1.5, false);
+    shape.holes.push(hole);
+    const g = new THREE.ExtrudeGeometry(shape, { depth: T, bevelEnabled: true, bevelThickness: 0.0015, bevelSize: 0.0015, bevelSegments: 2, curveSegments: 24 });
+    g.translate(0, 0, -T / 2);
+    // Перекладываем UV, чтобы волокно шло вдоль доски, как у остальных реек.
+    const pos = g.attributes.position as THREE.BufferAttribute;
+    const uv = g.attributes.uv as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) uv.setXY(i, (pos.getX(i) + w) / width, (pos.getY(i) + h) / PLANK_H);
+    uv.needsUpdate = true;
+    g.computeVertexNormals();
+    return g;
+  }, [width]);
+  return (
+    <mesh geometry={geo} position={position} castShadow receiveShadow>
+      <meshStandardMaterial map={tex} roughness={0.78} metalness={0} />
+    </mesh>
+  );
+}
+
 function Crate() {
   const planks = useMemo(() => Array.from({ length: 6 }, (_, k) => plankTexture(k)), []);
-  const handle = useMemo(() => {
-    const cv = document.createElement('canvas');
-    cv.width = 512; cv.height = 128;
-    const ctx = cv.getContext('2d')!;
-    ctx.fillStyle = '#0c0704';
-    ctx.beginPath(); ctx.roundRect(8, 8, 496, 112, 56); ctx.fill();
-    const g = ctx.createLinearGradient(0, 8, 0, 120);
-    g.addColorStop(0, 'rgba(0,0,0,.9)'); g.addColorStop(1, 'rgba(40,20,8,.6)');
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.roundRect(8, 8, 496, 112, 56); ctx.fill();
-    return toTexture(cv);
-  }, []);
   const stamp = useMemo(() => decalTexture(['M.S. RECORDS · № 01'], { w: 2048, h: 256, font: '700 118px Oswald, sans-serif', color: 'rgba(30,12,3,.62)', spacing: 22 }), []);
   const label = useMemo(() => decalTexture(['PORTFOLIO'], { w: 512, h: 128, font: '700 70px Oswald, sans-serif', color: '#2a1d12', bg: '#e9e1d2', spacing: 14 }), []);
 
@@ -288,18 +307,23 @@ function Crate() {
         <group key={k}>
           <Plank size={[T, PLANK_H, D]} position={[-sideX, y, 0]} tex={planks[k % 6]} />
           <Plank size={[T, PLANK_H, D]} position={[sideX, y, 0]} tex={planks[(k + 2) % 6]} />
-          <Plank size={[inner, PLANK_H, T]} position={[0, y, endZ]} tex={planks[(k + 3) % 6]} />
-          <Plank size={[inner, PLANK_H, T]} position={[0, y, -endZ]} tex={planks[(k + 4) % 6]} />
+          {k === 2 ? (
+            <>
+              <HandlePlank width={inner} position={[0, y, endZ]} tex={planks[(k + 3) % 6]} />
+              <HandlePlank width={inner} position={[0, y, -endZ]} tex={planks[(k + 4) % 6]} />
+            </>
+          ) : (
+            <>
+              <Plank size={[inner, PLANK_H, T]} position={[0, y, endZ]} tex={planks[(k + 3) % 6]} />
+              <Plank size={[inner, PLANK_H, T]} position={[0, y, -endZ]} tex={planks[(k + 4) % 6]} />
+            </>
+          )}
         </group>
       ))}
       {[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz], k) => (
         <Plank key={k} size={[0.03, WALL_H - T, 0.03]} position={[sx * postX, T + (WALL_H - T) / 2, sz * postZ]} tex={planks[(k + 1) % 6]} />
       ))}
-      {/* Вырез-ручка, наклейка и штамп */}
-      <mesh position={[0, rows[2], D / 2 + 0.0006]}>
-        <planeGeometry args={[0.12, 0.03]} />
-        <meshBasicMaterial map={handle} transparent />
-      </mesh>
+      {/* Наклейка и штамп */}
       <mesh position={[0, rows[0], D / 2 + 0.0008]} rotation-z={-0.03}>
         <planeGeometry args={[0.12, 0.03]} />
         <meshStandardMaterial map={label} roughness={0.9} />
@@ -354,10 +378,10 @@ function RecordMesh({ index, hovered, gone, front, vinyl, vinylRough, card }: Re
     const g = group.current;
     if (!g) return;
     const p = poseFor(index, hovered, gone);
-    const sp = gone && index === hovered ? 6.5 : 5;
+    const sp = gone && index === hovered ? 6 : 3.6;
     g.position.y = damp(g.position.y, p.y, sp, dt);
     g.rotation.x = damp(g.rotation.x, p.rot, sp, dt);
-    if (disc.current) disc.current.position.y = damp(disc.current.position.y, REC / 2 + p.peek, 4.2, dt);
+    if (disc.current) disc.current.position.y = damp(disc.current.position.y, REC / 2 + p.peek, 3.2, dt);
   });
 
   return (
@@ -382,7 +406,7 @@ function Divider({ hovered }: { hovered: number }) {
     let rot = -0.14;
     if (hovered > DIVIDER_AFTER) rot = 0.2;
     else if (hovered >= 0) rot = -0.23;
-    g.rotation.x = damp(g.rotation.x, rot, 5, dt);
+    g.rotation.x = damp(g.rotation.x, rot, 3.6, dt);
   });
   return (
     <group ref={group} position={[0, T, z]} rotation-x={-0.14}>
