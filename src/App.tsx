@@ -1,10 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { projects, trackCode } from './data/projects';
 import { CrateScene } from './components/CrateScene';
 import { CratePanel } from './components/CratePanel';
 import { Player } from './components/Player';
 import { SvgDefs } from './components/SvgDefs';
 import { useLightFlicker } from './hooks/useLightFlicker';
+
+// 3D-сцена грузится отдельным чанком; без WebGL остаётся CSS-версия ящика.
+const CrateScene3D = lazy(() => import('./three/CrateScene3D'));
+const hasWebGL = (() => {
+  try {
+    const c = document.createElement('canvas');
+    return !!(c.getContext('webgl2') || c.getContext('webgl'));
+  } catch {
+    return false;
+  }
+})();
+const use3D = hasWebGL && !new URLSearchParams(window.location.search).has('css');
 
 type View = 'crate' | 'player';
 
@@ -74,14 +86,13 @@ export default function App() {
       <SvgDefs />
       {view === 'crate' ? (
         <main className="crate-layout fade-in">
-          <CrateScene
-            hovered={hovered}
-            pulling={pulling}
-            returning={returning}
-            light={light}
-            onHover={hover}
-            onPick={play}
-          />
+          {use3D ? (
+            <Suspense fallback={<div className="stage" />}>
+              <CrateScene3D hovered={hovered} pulling={pulling} returning={returning} light={light} onHover={hover} onPick={play} />
+            </Suspense>
+          ) : (
+            <CrateScene hovered={hovered} pulling={pulling} returning={returning} light={light} onHover={hover} onPick={play} />
+          )}
           <CratePanel index={index} onHover={hover} onPlay={play} />
         </main>
       ) : (

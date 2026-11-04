@@ -1,0 +1,9 @@
+.stage3d { background: #0d0907; }
+.stage3d canvas { position: absolute !important; inset: 0; display: block; }
+.stage3d > div:first-child { position: absolute !important; inset: 0; }
+.room-dark-3d { opacity: calc((1 - var(--light)) * .55); }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+.sr-only button:focus { position: fixed; left: 16px; top: 16px; width: auto; height: auto; clip: auto; z-index: 50; }
