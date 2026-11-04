@@ -3,6 +3,13 @@ import type { ThreeEvent } from '@react-three/fiber';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
+// CC0-ассеты (Poly Haven через @pmndrs/assets): HDRI-окружение и карты нормалей.
+import hdri from '@pmndrs/assets/hdri/apartment.exr';
+import nBrushed from '@pmndrs/assets/normals/0004.webp';
+import nPowder from '@pmndrs/assets/normals/0021.webp';
+import nRubber from '@pmndrs/assets/normals/0018.webp';
+import nWood from '@pmndrs/assets/normals/0019.webp';
 import type { Project } from '../data/projects';
 import { drawCover } from './drawCover';
 import { decalTexture, plankTexture, plasterTexture, rng, toTexture, vinylRoughness, vinylTexture } from './textures';
@@ -172,11 +179,22 @@ function Lights() {
   const key = useRef<THREE.SpotLight>(null);
   const { scene, gl } = useThree();
   useEffect(() => {
+    // Сначала процедурная комната, затем настоящее HDRI-окружение — от него честные отражения в металле и виниле.
     const pmrem = new THREE.PMREMGenerator(gl);
-    const env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    scene.environment = env;
-    scene.environmentIntensity = 0.22;
-    return () => { env.dispose(); pmrem.dispose(); };
+    const room = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    scene.environment = room;
+    scene.environmentIntensity = 0.3;
+    let hdr: THREE.Texture | null = null;
+    let alive = true;
+    new EXRLoader().load(hdri, (tex) => {
+      if (!alive) { tex.dispose(); return; }
+      tex.mapping = THREE.EquirectangularReflectionMapping;
+      hdr = tex;
+      scene.environment = tex;
+      scene.environmentIntensity = 0.24;
+      scene.environmentRotation.set(0, 1.2, 0);
+    });
+    return () => { alive = false; room.dispose(); hdr?.dispose(); pmrem.dispose(); };
   }, [gl, scene]);
   useEffect(() => {
     if (!key.current) return;
@@ -187,12 +205,12 @@ function Lights() {
     <>
       <spotLight
         ref={key}
-        position={[-0.35, 1.25, 0.45]}
-        angle={0.55}
-        penumbra={0.9}
+        position={[-0.45, 0.95, 0.35]}
+        angle={0.6}
+        penumbra={0.85}
         decay={2}
-        intensity={14}
-        color="#ffcb98"
+        intensity={5.5}
+        color="#ffe0c2"
         castShadow
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.0003}
@@ -201,7 +219,7 @@ function Lights() {
         shadow-blurSamples={16}
       />
       <pointLight position={[0.55, 0.45, -0.55]} intensity={0.9} color="#ff9a52" decay={2} />
-      <hemisphereLight args={['#ffd8b0', '#140a04', 0.12]} />
+      <hemisphereLight args={['#ffd8b0', '#140a04', 0.2]} />
     </>
   );
 }
@@ -239,21 +257,39 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
   const mat = useMemo(() => rubberMat(), []);
   const knurlTex = useMemo(() => knurl(), []);
   const cover = useMemo(() => drawCover(project, code, 1024), [project, code]);
-  const vinyl = useMemo(() => vinylTexture(cover), [cover]);
+  const vinyl = useMemo(() => vinylTexture(cover, undefined, 2048), [cover]);
   const vRough = useMemo(() => vinylRoughness(), []);
 
-  // Материалы: сатинированный алюминий вместо зеркального хрома — так металл читается как металл.
-  const alu = useMemo(() => new THREE.MeshStandardMaterial({ color: '#c9c9c7', metalness: 1, roughness: 0.38 }), []);
-  const aluDark = useMemo(() => new THREE.MeshStandardMaterial({ color: '#8b8a88', metalness: 1, roughness: 0.45 }), []);
-  const blackMetal = useMemo(() => new THREE.MeshStandardMaterial({ color: '#1c1b1a', metalness: 0.5, roughness: 0.5 }), []);
+  const normals = useMemo(() => {
+    const load = (url: string, rx: number, ry: number) => {
+      const t = new THREE.TextureLoader().load(url);
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.repeat.set(rx, ry);
+      t.anisotropy = 16;
+      return t;
+    };
+    return {
+      brushed: load(nBrushed, 6, 1.5),
+      brushedFine: load(nBrushed, 3, 0.4),
+      powder: load(nPowder, 7, 7),
+      rubber: load(nRubber, 10, 10),
+      wood: load(nWood, 1, 4),
+    };
+  }, []);
+
+  // Материалы: сатинированный (шлифованный) алюминий с анизотропным бликом, матовая порошковая краска, резина.
+
+  const alu = useMemo(() => new THREE.MeshPhysicalMaterial({ color: '#9c9c9a', metalness: 1, roughness: 0.42, anisotropy: 0.6, normalMap: normals.brushedFine, normalScale: new THREE.Vector2(0.12, 0.12) }), [normals]);
+  const aluDark = useMemo(() => new THREE.MeshPhysicalMaterial({ color: '#7a7977', metalness: 1, roughness: 0.45, anisotropy: 0.5, normalMap: normals.brushedFine, normalScale: new THREE.Vector2(0.1, 0.1) }), [normals]);
+  const blackMetal = useMemo(() => new THREE.MeshStandardMaterial({ color: '#1b1a19', metalness: 0.55, roughness: 0.48, normalMap: normals.powder, normalScale: new THREE.Vector2(0.25, 0.25) }), [normals]);
   const plastic = useMemo(() => new THREE.MeshStandardMaterial({ color: '#141312', metalness: 0, roughness: 0.6 }), []);
-  const rubber = useMemo(() => new THREE.MeshStandardMaterial({ color: '#0d0d0d', roughness: 0.95 }), []);
+  const rubber = useMemo(() => new THREE.MeshStandardMaterial({ color: '#0d0d0d', roughness: 0.92, normalMap: normals.rubber, normalScale: new THREE.Vector2(0.3, 0.3) }), [normals]);
   const platterMats = useMemo(() => [
-    new THREE.MeshStandardMaterial({ map: strobe, metalness: 0.9, roughness: 0.4 }),
-    new THREE.MeshStandardMaterial({ color: '#9c9c9a', metalness: 1, roughness: 0.4 }),
+    new THREE.MeshStandardMaterial({ map: strobe, metalness: 0.9, roughness: 0.32 }),
+    new THREE.MeshPhysicalMaterial({ color: '#7c7c7a', metalness: 1, roughness: 0.42, anisotropy: 0.7, normalMap: normals.brushed, normalScale: new THREE.Vector2(0.1, 0.1) }),
     new THREE.MeshStandardMaterial({ color: '#777', metalness: 1, roughness: 0.5 }),
-  ], [strobe]);
-  const matMats = useMemo(() => [rubber, new THREE.MeshStandardMaterial({ map: mat, roughness: 0.95 }), rubber], [mat, rubber]);
+  ], [strobe, normals]);
+  const matMats = useMemo(() => [rubber, new THREE.MeshStandardMaterial({ map: mat, roughness: 0.9, normalMap: normals.rubber, normalScale: new THREE.Vector2(0.35, 0.35) }), rubber], [mat, rubber, normals]);
   const recordMats = useMemo(() => {
     const { cv, ctx } = canvas(256, 256);
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 256, 256);
@@ -264,10 +300,6 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
     });
     return [new THREE.MeshStandardMaterial({ color: '#0e0e0e', roughness: 0.35 }), face, face];
   }, [vinyl, vRough]);
-  const lidMat = useMemo(() => new THREE.MeshPhysicalMaterial({
-    color: '#3a2e26', transparent: true, opacity: 0.2, roughness: 0.04, metalness: 0, clearcoat: 1, side: THREE.DoubleSide, depthWrite: false,
-  }), []);
-  const lidEdge = useMemo(() => new THREE.MeshPhysicalMaterial({ color: '#2a201a', transparent: true, opacity: 0.55, roughness: 0.1 }), []);
 
   const record = useRef<THREE.Group>(null);
   const spin = useRef<THREE.Group>(null);
@@ -359,11 +391,11 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
       {/* Корпус: ореховый плинт на демпфирующих ножках, сверху матовая чёрная панель */}
       <mesh position={[BODY_CX, -BODY.h / 2 - 0.004, 0]} castShadow receiveShadow>
         <boxGeometry args={[BODY_W, BODY.h, BODY_D]} />
-        <meshStandardMaterial map={walnut} color="#6e4c33" roughness={0.55} />
+        <meshStandardMaterial map={walnut} color="#6e4c33" roughness={0.5} normalMap={normals.wood} normalScale={new THREE.Vector2(0.35, 0.35)} />
       </mesh>
       <mesh position={[BODY_CX, -0.002, 0]} receiveShadow>
         <boxGeometry args={[BODY_W - 0.004, 0.004, BODY_D - 0.004]} />
-        <meshStandardMaterial map={black} color="#9a9a9a" roughness={0.8} metalness={0.1} />
+        <meshStandardMaterial map={black} color="#8a8a8a" roughness={0.62} metalness={0.2} normalMap={normals.powder} normalScale={new THREE.Vector2(0.35, 0.35)} />
       </mesh>
       {[[BODY.x0 + 0.04, BODY.z0 + 0.04], [BODY.x1 - 0.04, BODY.z0 + 0.04], [BODY.x0 + 0.04, BODY.z1 - 0.04], [BODY.x1 - 0.04, BODY.z1 - 0.04]].map(([x, z], i) => (
         <group key={i} position={[x, -BODY.h - 0.004, z]}>
@@ -521,23 +553,6 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
       <Engrave text="ANTI-SKATE" x={0.24} z={-0.128} w={0.034} />
       <Engrave text="M.S. · SL-01  DIRECT DRIVE" x={-0.06} z={-0.17} w={0.11} />
 
-      {/* Пылезащитная крышка — открыта, дымчатый акрил */}
-      <group position={[BODY_CX, 0.0, BODY.z0 + 0.004]} rotation-x={-1.22}>
-        <mesh position={[0, 0.072, BODY_D / 2]} material={lidMat}>
-          <boxGeometry args={[BODY_W, 0.003, BODY_D]} />
-        </mesh>
-        {[-1, 1].map((sx) => (
-          <mesh key={sx} position={[(sx * BODY_W) / 2, 0.036, BODY_D / 2]} material={lidMat}>
-            <boxGeometry args={[0.003, 0.072, BODY_D]} />
-          </mesh>
-        ))}
-        <mesh position={[0, 0.036, BODY_D]} material={lidMat}>
-          <boxGeometry args={[BODY_W, 0.072, 0.003]} />
-        </mesh>
-        <mesh position={[0, 0.0725, BODY_D / 2]} material={lidEdge}>
-          <boxGeometry args={[BODY_W + 0.002, 0.0015, 0.003]} />
-        </mesh>
-      </group>
       {[BODY.x0 + 0.07, BODY.x1 - 0.07].map((x) => (
         <mesh key={x} position={[x, 0.004, BODY.z0 + 0.008]} castShadow material={blackMetal}>
           <boxGeometry args={[0.04, 0.012, 0.016]} />
@@ -547,15 +562,15 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
   );
 }
 
-/** 3D-проигрыватель в ракурсе 3/4, на тумбе в той же тёплой комнате. */
+/** 3D-проигрыватель сверху: половина пластинки у левого края, тонарм и органы управления справа. */
 export default function Player3D(props: Props) {
   return (
     <Canvas
       className="player3d"
       shadows={{ type: THREE.VSMShadowMap }}
-      dpr={[1, 1.75]}
-      camera={{ position: [0.16, 0.6, 0.78], fov: 38, near: 0.01, far: 6 }}
-      onCreated={({ camera }) => camera.lookAt(0.015, -0.03, -0.03)}
+      dpr={[1, 2]}
+      camera={{ position: [0.16, 0.56, 0.14], fov: 36, near: 0.01, far: 6 }}
+      onCreated={({ camera }) => camera.lookAt(0.16, 0, 0.005)}
       gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.0 }}
     >
       <color attach="background" args={['#0d0907']} />

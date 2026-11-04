@@ -160,16 +160,17 @@ export function plasterBump() {
 }
 
 /** Лицевая сторона винила: бороздки, межтрековые паузы, этикетка с обложкой. */
-export function vinylTexture(cover: HTMLCanvasElement | null, labelColor = '#E0452C') {
-  const S = 1024, C = S / 2;
+export function vinylTexture(cover: HTMLCanvasElement | null, labelColor = '#E0452C', S = 1024) {
+  const C = S / 2;
+  const k = S / 1024;
   const { cv, ctx } = canvas(S, S);
   ctx.fillStyle = '#0b0b0b';
   ctx.beginPath(); ctx.arc(C, C, C, 0, Math.PI * 2); ctx.fill();
-  for (let r = C * 0.36; r < C * 0.975; r += 1.6) {
+  for (let r = C * 0.36; r < C * 0.975; r += 1.6 * Math.max(1, k * 0.6)) {
     const t = r / C;
     const gap = [0.53, 0.69, 0.84].some((g) => Math.abs(t - g) < 0.006);
     ctx.strokeStyle = gap ? '#050505' : (Math.floor(r / 1.6) % 2 ? '#141414' : '#0e0e0e');
-    ctx.lineWidth = gap ? 2.4 : 1;
+    ctx.lineWidth = gap ? 2.4 * k : Math.max(1, k * 0.8);
     ctx.beginPath(); ctx.arc(C, C, r, 0, Math.PI * 2); ctx.stroke();
   }
   // Гладкий бортик
