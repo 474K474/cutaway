@@ -4,6 +4,10 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
+import { EffectComposer, N8AO, ToneMapping, Vignette } from '@react-three/postprocessing';
+import { ToneMappingMode } from 'postprocessing';
 // CC0-ассеты (Poly Haven через @pmndrs/assets): HDRI-окружение и карты нормалей.
 import hdri from '@pmndrs/assets/hdri/apartment.exr';
 import nBrushed from '@pmndrs/assets/normals/0004.webp';
@@ -122,6 +126,123 @@ function knurl() {
   return toTexture(cv);
 }
 
+/**
+ * Направление анизотропии винила: по касательной к бороздкам.
+ * Именно это даёт настоящей пластинке «крест» из блика, который стоит на месте, пока диск крутится.
+ */
+function vinylAniso() {
+  const S = 1024, C = S / 2;
+  const { cv, ctx } = canvas(S, S);
+  const img = ctx.createImageData(S, S);
+  const d = img.data;
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const dx = x - C + 0.5, dy = y - C + 0.5;
+      const r = Math.hypot(dx, dy) / C;
+      const i = (y * S + x) * 4;
+      const tx = -dy / (r * C || 1), ty = dx / (r * C || 1);
+      d[i] = (tx * 0.5 + 0.5) * 255;
+      d[i + 1] = (ty * 0.5 + 0.5) * 255;
+      d[i + 2] = r > 0.36 && r < 0.975 ? 255 : 0;
+      d[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return toTexture(cv, { srgb: false });
+}
+
+/**
+ * Карта шероховатости «с жизнью»: отпечатки пальцев, разводы, пыль и микроцарапины.
+ * Без неё любая поверхность выглядит как идеальный пластик.
+ */
+function grime(seed: number, base: number, opts: { prints?: number; scratches?: number; dust?: number; smudge?: number } = {}) {
+  const S = 1024;
+  const { cv, ctx } = canvas(S, S);
+  const r = rng(seed);
+  const g = Math.round(base * 255);
+  ctx.fillStyle = `rgb(${g},${g},${g})`;
+  ctx.fillRect(0, 0, S, S);
+  // Крупные разводы — неравномерная протирка
+  for (let i = 0; i < (opts.smudge ?? 26); i++) {
+    const x = r() * S, y = r() * S, rad = 60 + r() * 220;
+    const gr = ctx.createRadialGradient(x, y, 0, x, y, rad);
+    const v = r() < 0.5 ? 0 : 255;
+    gr.addColorStop(0, `rgba(${v},${v},${v},${0.05 + r() * 0.07})`);
+    gr.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gr;
+    ctx.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+  // Отпечатки пальцев — завитки чуть более гладкие (жир)
+  for (let i = 0; i < (opts.prints ?? 5); i++) {
+    const x = r() * S, y = r() * S, w = 26 + r() * 14, rot = r() * Math.PI;
+    ctx.save();
+    ctx.translate(x, y); ctx.rotate(rot);
+    ctx.strokeStyle = 'rgba(0,0,0,.16)';
+    ctx.lineWidth = 1.3;
+    for (let k = 2; k < 15; k++) {
+      ctx.beginPath();
+      ctx.ellipse(0, 0, w * (k / 15), w * 1.35 * (k / 15), 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  // Микроцарапины — светлее (шероховатее)
+  for (let i = 0; i < (opts.scratches ?? 260); i++) {
+    const x = r() * S, y = r() * S, len = 8 + r() * 70, a = r() * Math.PI;
+    ctx.strokeStyle = `rgba(255,255,255,${0.08 + r() * 0.18})`;
+    ctx.lineWidth = 0.6 + r() * 0.7;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len);
+    ctx.stroke();
+  }
+  // Пыль
+  for (let i = 0; i < (opts.dust ?? 900); i++) {
+    ctx.fillStyle = `rgba(255,255,255,${0.15 + r() * 0.35})`;
+    ctx.fillRect(r() * S, r() * S, 1 + r() * 1.5, 1 + r() * 1.5);
+  }
+  const t = toTexture(cv, { srgb: false });
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+/** Светлые пылинки и волоски на виниле — поверх цветовой карты. */
+function dustOnVinyl(tex: THREE.Texture, seed: number) {
+  const cv = tex.image as HTMLCanvasElement;
+  const ctx = cv.getContext('2d')!;
+  const r = rng(seed);
+  const S = cv.width, C = S / 2;
+  for (let i = 0; i < 160; i++) {
+    const a = r() * Math.PI * 2, rad = C * (0.38 + r() * 0.58);
+    const x = C + Math.cos(a) * rad, y = C + Math.sin(a) * rad;
+    ctx.fillStyle = `rgba(200,195,185,${0.25 + r() * 0.4})`;
+    ctx.fillRect(x, y, 1 + r() * 2, 1 + r() * 2);
+  }
+  for (let i = 0; i < 4; i++) {
+    const a = r() * Math.PI * 2, rad = C * (0.45 + r() * 0.45);
+    const x = C + Math.cos(a) * rad, y = C + Math.sin(a) * rad;
+    ctx.strokeStyle = 'rgba(190,185,175,.35)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.bezierCurveTo(x + 10, y - 14, x + 22, y + 6, x + 30 + r() * 20, y - 4);
+    ctx.stroke();
+  }
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** Фаска верхней кромки платтера — полированный поясок, на котором ловится блик. */
+function chamferRing(R: number, h: number) {
+  const pts = [
+    new THREE.Vector2(R - h * 1.2, 0),
+    new THREE.Vector2(R - h * 0.5, -h * 0.15),
+    new THREE.Vector2(R - h * 0.12, -h * 0.55),
+    new THREE.Vector2(R, -h * 1.2),
+  ];
+  return new THREE.LatheGeometry(pts, 160);
+}
+
 // ---------- Мелкие детали ----------
 
 function Engrave({ text, x, z, w, rot = 0 }: { text: string; x: number; z: number; w: number; rot?: number }) {
@@ -143,6 +264,8 @@ function PushButton({ position, size, color = '#2a2725', active = false, label, 
 }) {
   const cap = useRef<THREE.Mesh>(null);
   const press = useRef(0);
+  const capGeo = useMemo(() => new RoundedBoxGeometry(size[0], size[1], size[2], 3, Math.min(size[0], size[1], size[2]) * 0.3), [size]);
+  const grimeMap = useMemo(() => grime(size[0] * 1000, 0.42, { prints: 1, scratches: 30, smudge: 6 }), [size]);
   useFrame((_, dt) => {
     press.current = Math.max(0, press.current - dt * 6);
     if (cap.current) cap.current.position.y = size[1] / 2 + 0.001 - press.current * 0.0035 - (active ? 0.0008 : 0);
@@ -165,15 +288,24 @@ function PushButton({ position, size, color = '#2a2725', active = false, label, 
         onPointerOver={(e) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; }}
         onPointerOut={() => { document.body.style.cursor = ''; }}
         name={label}
+        geometry={capGeo}
       >
-        <boxGeometry args={size} />
-        <meshStandardMaterial color={color} roughness={0.55} metalness={0.15} />
+        <meshPhysicalMaterial color={color} roughness={0.38} metalness={0.05} clearcoat={0.35} clearcoatRoughness={0.4} roughnessMap={grimeMap} />
       </mesh>
     </group>
   );
 }
 
 // ---------- Свет и комната ----------
+
+RectAreaLightUniformsLib.init();
+
+/** Большой мягкий «софтбокс» — широкие плавные блики на виниле и металле, как на предметной съёмке. */
+function Softbox() {
+  const ref = useRef<THREE.RectAreaLight>(null);
+  useEffect(() => { ref.current?.lookAt(0.08, 0, 0); }, []);
+  return <rectAreaLight ref={ref} position={[-0.32, 0.42, -0.26]} width={0.5} height={0.22} intensity={7} color="#ffe2c4" />;
+}
 
 function Lights() {
   const key = useRef<THREE.SpotLight>(null);
@@ -219,7 +351,8 @@ function Lights() {
         shadow-blurSamples={16}
       />
       <pointLight position={[0.55, 0.45, -0.55]} intensity={0.9} color="#ff9a52" decay={2} />
-      <hemisphereLight args={['#ffd8b0', '#140a04', 0.2]} />
+      <hemisphereLight args={['#ffd8b0', '#140a04', 0.16]} />
+      <Softbox />
     </>
   );
 }
@@ -259,6 +392,29 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
   const cover = useMemo(() => drawCover(project, code, 1024), [project, code]);
   const vinyl = useMemo(() => vinylTexture(cover, undefined, 2048), [cover]);
   const vRough = useMemo(() => vinylRoughness(), []);
+  const aniso = useMemo(() => vinylAniso(), []);
+  const grimes = useMemo(() => {
+    const plate = grime(11, 0.6, { prints: 7, scratches: 320, dust: 1400 });
+    plate.repeat.set(1.4, 1.1);
+    return {
+      plate,
+      vinyl: grime(23, 0.22, { prints: 3, scratches: 420, dust: 400, smudge: 18 }),
+      metal: grime(37, 0.34, { prints: 2, scratches: 500, dust: 300 }),
+      plastic: grime(41, 0.46, { prints: 2, scratches: 120 }),
+    };
+  }, []);
+  useMemo(() => dustOnVinyl(vinyl, 7), [vinyl]);
+  const geo = useMemo(() => ({
+    body: new RoundedBoxGeometry(BODY_W, BODY.h, BODY_D, 4, 0.006),
+    plate: new RoundedBoxGeometry(BODY_W - 0.004, 0.004, BODY_D - 0.004, 2, 0.0018),
+    headshell: new RoundedBoxGeometry(0.019, 0.0045, 0.036, 2, 0.0018),
+    cart: new RoundedBoxGeometry(0.014, 0.01, 0.019, 2, 0.0016),
+    pivotBlock: new RoundedBoxGeometry(0.026, 0.024, 0.026, 3, 0.004),
+    fader: new RoundedBoxGeometry(0.022, 0.011, 0.014, 2, 0.003),
+    cueBox: new RoundedBoxGeometry(0.014, 0.012, 0.028, 2, 0.003),
+    hinge: new RoundedBoxGeometry(0.04, 0.012, 0.016, 2, 0.003),
+    chamfer: chamferRing(PLATTER_R, 0.004),
+  }), []);
 
   const normals = useMemo(() => {
     const load = (url: string, rx: number, ry: number) => {
@@ -279,10 +435,13 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
 
   // Материалы: сатинированный (шлифованный) алюминий с анизотропным бликом, матовая порошковая краска, резина.
 
-  const alu = useMemo(() => new THREE.MeshPhysicalMaterial({ color: '#9c9c9a', metalness: 1, roughness: 0.42, anisotropy: 0.6, normalMap: normals.brushedFine, normalScale: new THREE.Vector2(0.12, 0.12) }), [normals]);
-  const aluDark = useMemo(() => new THREE.MeshPhysicalMaterial({ color: '#7a7977', metalness: 1, roughness: 0.45, anisotropy: 0.5, normalMap: normals.brushedFine, normalScale: new THREE.Vector2(0.1, 0.1) }), [normals]);
-  const blackMetal = useMemo(() => new THREE.MeshStandardMaterial({ color: '#1b1a19', metalness: 0.55, roughness: 0.48, normalMap: normals.powder, normalScale: new THREE.Vector2(0.25, 0.25) }), [normals]);
-  const plastic = useMemo(() => new THREE.MeshStandardMaterial({ color: '#141312', metalness: 0, roughness: 0.6 }), []);
+  const alu = useMemo(() => new THREE.MeshPhysicalMaterial({ color: '#a3a29f', metalness: 1, roughness: 1, roughnessMap: grimes.metal, anisotropy: 0.75, normalMap: normals.brushedFine, normalScale: new THREE.Vector2(0.12, 0.12) }), [normals, grimes]);
+  // Трубка тонарма: шлифовка вдоль длины, поэтому анизотропия повёрнута на 90°.
+  const armTube = useMemo(() => new THREE.MeshPhysicalMaterial({ color: '#b2b1ae', metalness: 1, roughness: 1, roughnessMap: grimes.metal, anisotropy: 0.9, anisotropyRotation: Math.PI / 2 }), [grimes]);
+  const aluPolished = useMemo(() => new THREE.MeshPhysicalMaterial({ color: '#d6d5d2', metalness: 1, roughness: 0.14 }), []);
+  const aluDark = useMemo(() => new THREE.MeshPhysicalMaterial({ color: '#7a7977', metalness: 1, roughness: 1, roughnessMap: grimes.metal, anisotropy: 0.5, normalMap: normals.brushedFine, normalScale: new THREE.Vector2(0.1, 0.1) }), [normals, grimes]);
+  const blackMetal = useMemo(() => new THREE.MeshPhysicalMaterial({ color: '#1d1c1b', metalness: 0.6, roughness: 1, roughnessMap: grimes.plastic, normalMap: normals.powder, normalScale: new THREE.Vector2(0.3, 0.3), clearcoat: 0.15, clearcoatRoughness: 0.5 }), [normals, grimes]);
+  const plastic = useMemo(() => new THREE.MeshPhysicalMaterial({ color: '#161514', metalness: 0, roughness: 1, roughnessMap: grimes.plastic, clearcoat: 0.3, clearcoatRoughness: 0.45 }), [grimes]);
   const rubber = useMemo(() => new THREE.MeshStandardMaterial({ color: '#0d0d0d', roughness: 0.92, normalMap: normals.rubber, normalScale: new THREE.Vector2(0.3, 0.3) }), [normals]);
   const platterMats = useMemo(() => [
     new THREE.MeshStandardMaterial({ map: strobe, metalness: 0.9, roughness: 0.32 }),
@@ -295,11 +454,14 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 256, 256);
     ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(128, 128, 128 * 0.345, 0, Math.PI * 2); ctx.fill();
     const face = new THREE.MeshPhysicalMaterial({
-      map: vinyl, roughnessMap: vRough, roughness: 1,
-      clearcoat: 0.55, clearcoatMap: toTexture(cv, { srgb: false }), clearcoatRoughness: 0.28,
+      map: vinyl, roughnessMap: vRough, roughness: 0.85,
+      // Анизотропный блик по бороздкам + тонкий «лак» со следами пальцев и пылью
+      anisotropy: 0.92, anisotropyMap: aniso,
+      clearcoat: 0.4, clearcoatMap: toTexture(cv, { srgb: false }),
+      clearcoatRoughness: 1, clearcoatRoughnessMap: grimes.vinyl,
     });
-    return [new THREE.MeshStandardMaterial({ color: '#0e0e0e', roughness: 0.35 }), face, face];
-  }, [vinyl, vRough]);
+    return [new THREE.MeshStandardMaterial({ color: '#0e0e0e', roughness: 0.32 }), face, face];
+  }, [vinyl, vRough, aniso, grimes]);
 
   const record = useRef<THREE.Group>(null);
   const spin = useRef<THREE.Group>(null);
@@ -389,13 +551,12 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
   return (
     <group>
       {/* Корпус: ореховый плинт на демпфирующих ножках, сверху матовая чёрная панель */}
-      <mesh position={[BODY_CX, -BODY.h / 2 - 0.004, 0]} castShadow receiveShadow>
-        <boxGeometry args={[BODY_W, BODY.h, BODY_D]} />
-        <meshStandardMaterial map={walnut} color="#6e4c33" roughness={0.5} normalMap={normals.wood} normalScale={new THREE.Vector2(0.35, 0.35)} />
+      <mesh position={[BODY_CX, -BODY.h / 2 - 0.004, 0]} castShadow receiveShadow geometry={geo.body}>
+        <meshPhysicalMaterial map={walnut} color="#6e4c33" roughness={0.55} normalMap={normals.wood} normalScale={new THREE.Vector2(0.35, 0.35)} clearcoat={0.35} clearcoatRoughness={0.35} />
       </mesh>
-      <mesh position={[BODY_CX, -0.002, 0]} receiveShadow>
-        <boxGeometry args={[BODY_W - 0.004, 0.004, BODY_D - 0.004]} />
-        <meshStandardMaterial map={black} color="#8a8a8a" roughness={0.62} metalness={0.2} normalMap={normals.powder} normalScale={new THREE.Vector2(0.35, 0.35)} />
+      {/* Анодированная верхняя панель: матовая, но со следами рук и пылью */}
+      <mesh position={[BODY_CX, -0.002, 0]} receiveShadow geometry={geo.plate}>
+        <meshPhysicalMaterial map={black} color="#a19d98" metalness={0.45} roughness={1} roughnessMap={grimes.plate} normalMap={normals.powder} normalScale={new THREE.Vector2(0.22, 0.22)} />
       </mesh>
       {[[BODY.x0 + 0.04, BODY.z0 + 0.04], [BODY.x1 - 0.04, BODY.z0 + 0.04], [BODY.x0 + 0.04, BODY.z1 - 0.04], [BODY.x1 - 0.04, BODY.z1 - 0.04]].map(([x, z], i) => (
         <group key={i} position={[x, -BODY.h - 0.004, z]}>
@@ -412,6 +573,7 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
       <mesh position={[0, PLATTER_Y0 + PLATTER_H / 2, 0]} castShadow receiveShadow material={platterMats}>
         <cylinderGeometry args={[PLATTER_R, PLATTER_R, PLATTER_H, 160, 1]} />
       </mesh>
+      <mesh position={[0, PLATTER_Y0 + PLATTER_H + 0.0001, 0]} geometry={geo.chamfer} material={aluPolished} />
       <mesh position={[0, MAT_Y, 0]} receiveShadow material={matMats}>
         <cylinderGeometry args={[REC_R + 0.002, REC_R + 0.002, MAT_T, 128]} />
       </mesh>
@@ -452,11 +614,9 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
           <cylinderGeometry args={[0.02, 0.024, 0.018, 48]} />
         </mesh>
         <group ref={armYaw}>
-          <mesh position={[0, 0.036, 0]} castShadow material={blackMetal}>
-            <boxGeometry args={[0.026, 0.024, 0.026]} />
-          </mesh>
+          <mesh position={[0, 0.036, 0]} castShadow material={blackMetal} geometry={geo.pivotBlock} />
           <group ref={armPitch} position={[0, ARM_Y, 0]}>
-            <mesh position={[0, 0, ARM_LEN / 2 - 0.012]} rotation-x={Math.PI / 2} castShadow material={alu}>
+            <mesh position={[0, 0, ARM_LEN / 2 - 0.012]} rotation-x={Math.PI / 2} castShadow material={armTube}>
               <cylinderGeometry args={[0.004, 0.004, ARM_LEN - 0.024, 24]} />
             </mesh>
             <mesh position={[0, 0, -0.022]} rotation-x={Math.PI / 2} castShadow material={aluDark}>
@@ -464,22 +624,19 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
             </mesh>
             <mesh position={[0, 0, -0.054]} rotation-x={Math.PI / 2} castShadow>
               <cylinderGeometry args={[0.016, 0.016, 0.03, 40]} />
-              <meshStandardMaterial map={knurlTex} metalness={1} roughness={0.45} />
+              <meshPhysicalMaterial map={knurlTex} metalness={1} roughness={0.38} anisotropy={0.6} />
             </mesh>
             <mesh position={[0, 0, -0.07]} rotation-x={Math.PI / 2} material={blackMetal}>
               <cylinderGeometry args={[0.0165, 0.0165, 0.003, 40]} />
             </mesh>
             {/* Головка: корпус, пальчик-лифт, картридж, игла */}
             <group position={[0, -0.004, ARM_LEN - 0.013]} rotation-y={-0.36}>
-              <mesh castShadow material={plastic}>
-                <boxGeometry args={[0.019, 0.0045, 0.036]} />
-              </mesh>
+              <mesh castShadow material={plastic} geometry={geo.headshell} />
               <mesh position={[0.016, 0.0005, -0.008]} rotation-z={0.25} castShadow material={alu}>
                 <boxGeometry args={[0.016, 0.0016, 0.004]} />
               </mesh>
-              <mesh position={[0, -0.007, 0.004]} castShadow>
-                <boxGeometry args={[0.014, 0.01, 0.019]} />
-                <meshStandardMaterial color="#c23a26" roughness={0.5} />
+              <mesh position={[0, -0.007, 0.004]} castShadow geometry={geo.cart}>
+                <meshPhysicalMaterial color="#b8341f" roughness={0.4} clearcoat={0.6} clearcoatRoughness={0.25} />
               </mesh>
               <mesh position={[0, -0.0128, 0.011]} material={alu}>
                 <cylinderGeometry args={[0.0005, 0.0003, 0.003, 8]} />
@@ -501,9 +658,7 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
 
       {/* Микролифт, антискейтинг, адаптер 45 */}
       <group position={[0.24, 0, -0.045]}>
-        <mesh position={[0, 0.006, 0]} castShadow material={blackMetal}>
-          <boxGeometry args={[0.014, 0.012, 0.028]} />
-        </mesh>
+        <mesh position={[0, 0.006, 0]} castShadow material={blackMetal} geometry={geo.cueBox} />
         <group ref={cue} position={[0, 0.012, 0.008]}>
           <mesh position={[0, 0.011, 0]} castShadow material={alu}>
             <boxGeometry args={[0.003, 0.022, 0.003]} />
@@ -528,9 +683,7 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
         <boxGeometry args={[0.006, 0.0008, 0.1]} />
         <meshStandardMaterial color="#030303" roughness={1} />
       </mesh>
-      <mesh position={[0.24, 0.006, 0.11]} castShadow material={plastic}>
-        <boxGeometry args={[0.022, 0.011, 0.014]} />
-      </mesh>
+      <mesh position={[0.24, 0.006, 0.11]} castShadow material={plastic} geometry={geo.fader} />
       <mesh position={[0.24, 0.0118, 0.11]}>
         <boxGeometry args={[0.016, 0.0006, 0.0016]} />
         <meshStandardMaterial color="#e8e2d8" roughness={0.6} />
@@ -554,9 +707,7 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
       <Engrave text="M.S. · SL-01  DIRECT DRIVE" x={-0.06} z={-0.17} w={0.11} />
 
       {[BODY.x0 + 0.07, BODY.x1 - 0.07].map((x) => (
-        <mesh key={x} position={[x, 0.004, BODY.z0 + 0.008]} castShadow material={blackMetal}>
-          <boxGeometry args={[0.04, 0.012, 0.016]} />
-        </mesh>
+        <mesh key={x} position={[x, 0.004, BODY.z0 + 0.008]} castShadow material={blackMetal} geometry={geo.hinge} />
       ))}
     </group>
   );
@@ -578,6 +729,12 @@ export default function Player3D(props: Props) {
       <Lights />
       <Room />
       <Turntable {...props} />
+      {/* Контактные тени в щелях и под деталями + мягкая виньетка */}
+      <EffectComposer multisampling={4}>
+        <N8AO aoRadius={0.025} distanceFalloff={0.6} intensity={2.4} halfRes color="#120a05" />
+        <Vignette offset={0.32} darkness={0.55} />
+        <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
+      </EffectComposer>
     </Canvas>
   );
 }
