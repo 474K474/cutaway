@@ -119,7 +119,7 @@ class Flow:
         """Run one step with its own timeout. Later steps are skipped after a failure."""
         full = f"{self.name} / {label}"
         if self.aborted:
-            self.results.append((full, False, "skipped (earlier step failed)"))
+            self.results.append((full, None, "skipped (earlier step failed)"))
             print(f"  SKIP {full}", flush=True)
             return None
         t0 = time.perf_counter()
@@ -346,9 +346,15 @@ async def mobile_flow(fl: Flow, base: str):
     async def drag_stack():
         before = (await p.locator(".m-code").first.inner_text()).strip()
         x, y, box = await center(p, ".m-crate")
-        await t.drag(x, box["y"] + box["height"] * 0.75, x, box["y"] + box["height"] * 0.15, steps=14)
+        top, bot = box["y"] + box["height"] * 0.2, box["y"] + box["height"] * 0.8
+        # pulling down advances the stack; at index 0 an upward drag only rubber-bands
+        await t.drag(x, top, x, bot, steps=14)
         await asyncio.sleep(1.5)
         after = (await p.locator(".m-code").first.inner_text()).strip()
+        if after == before:
+            await t.drag(x, bot, x, top, steps=14)
+            await asyncio.sleep(1.5)
+            after = (await p.locator(".m-code").first.inner_text()).strip()
         assert after != before, f".m-code unchanged ({before!r})"
         return f"{before} -> {after}"
     await fl.step("vertical drag changes .m-code", drag_stack, 30)
@@ -499,11 +505,12 @@ async def main_async(args) -> int:
     httpd.shutdown()
 
     print("\n== RESULTS")
-    failed = 0
+    failed = skipped = 0
     for fl in flows:
         for label, ok, note in fl.results:
-            failed += not ok
-            print(f"  {'PASS' if ok else 'FAIL'}  {label}  [{note}]")
+            failed += ok is False
+            skipped += ok is None
+            print(f"  {'PASS' if ok else 'SKIP' if ok is None else 'FAIL'}  {label}  [{note}]")
 
     print("\n== METRICS")
     for fl in flows:
@@ -524,7 +531,7 @@ async def main_async(args) -> int:
         for name, e in errs:
             print(f"  [{name}] " + e.replace("\n", "\n      "))
 
-    print(f"\n{'FAIL' if failed else 'PASS'}: {failed} failed step(s); screenshots in {shots}")
+    print(f"\n{'FAIL' if failed else 'PASS'}: {failed} failed, {skipped} skipped step(s); screenshots in {shots}")
     return 1 if failed else 0
 
 
