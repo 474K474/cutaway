@@ -10,7 +10,9 @@
 
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; min-height: 100%; }
-html { scrollbar-gutter: stable; }
+/* Полосы прокрутки не показываем нигде: прокрутка колесом, тачпадом и пальцем работает как обычно. */
+html, body, * { scrollbar-width: none; }
+::-webkit-scrollbar { width: 0; height: 0; background: transparent; }
 body {
   background: var(--bg);
   color: var(--text);

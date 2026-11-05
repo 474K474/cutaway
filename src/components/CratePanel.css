@@ -11,6 +11,13 @@
 .cp-current h1 { margin: 0; font-weight: 800; font-size: clamp(42px, 4.6vw, 74px); line-height: .95; letter-spacing: -.025em; }
 .cp-kind { margin: 0; font-size: 15px; }
 .cp-about { margin: 0; font-size: 17px; line-height: 1.6; max-width: 480px; }
+/* Под описание всегда отведено ровно 4 строки: длинное обрезается (полностью — в карточке на проигрывателе),
+   короткое не поднимает кнопки — раскладка одинаковая у всех пластинок. */
+@media (min-width: 1101px) {
+  .crate-panel { height: 100vh; min-height: 640px; }
+  .cp-about { height: calc(1.6em * 4); overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; }
+  .cp-current h1 { text-wrap: balance; min-height: 1.9em; display: flex; align-items: flex-end; }
+}
 .cp-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; }
 
 .cp-tracklist { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 36px; border-top: 1px solid var(--line); padding-top: 18px; }
