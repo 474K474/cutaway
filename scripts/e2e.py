@@ -324,7 +324,9 @@ async def desktop_flow(fl: Flow, base: str, three_d: bool):
         # JS click: a real click would wait for actionability/frames under software GL
         await wait_ms(p, "return [...document.querySelectorAll('.player button')].some(b => b.textContent.includes('Обратно в ящик'))", 30 * fl.scale)
         await p.evaluate("[...document.querySelectorAll('.player button')].find(b => b.textContent.includes('Обратно в ящик')).click()")
-        await wait_ms(p, vis(".crate-panel h1") + " && !document.querySelector('.player')", 180 * fl.scale)
+        # Проигрыватель после возврата остаётся смонтированным (заранее прогретая сцена), но скрыт.
+        hidden_player = "(() => { const el = document.querySelector('.player'); return !el || getComputedStyle(el).visibility === 'hidden'; })()"
+        await wait_ms(p, "if (!(" + hidden_player + ")) return false; " + VISIBLE.replace("SEL", repr(".crate-panel h1")), 180 * fl.scale)
         if three_d:
             await wait_ms(p, vis(".stage3d canvas"), 180 * fl.scale)
         return ""
