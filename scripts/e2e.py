@@ -415,6 +415,18 @@ async def mobile_flow(fl: Flow, base: str):
     await fl.step("START·STOP toggles ИГРАЕТ/ПАУЗА", toggle, 30)
     await fl.shot("paused-toggle")
 
+    async def insert_tab():
+        await p.get_by_role("tab", name="Вкладыш").click(timeout=10_000)
+        await wait_ms(p, "return !!document.querySelector('.insert, .insert-empty')", 10 * fl.scale)
+        prints = await p.locator(".print").count()
+        if prints:
+            await p.locator(".print").first.click(timeout=10_000)
+            await wait_ms(p, "return !!document.querySelector('.lightbox img')", 10 * fl.scale)
+            await p.locator(".lb-close").click(timeout=10_000)
+            await wait_ms(p, "return !document.querySelector('.lightbox')", 10 * fl.scale)
+        return f"{prints} print(s)" if prints else "empty insert"
+    await fl.step("Вкладыш tab renders (+ lightbox)", insert_tab, 40)
+
     async def back():
         await p.locator(".pp .m-back").click(timeout=10_000)
         await wait_ms(p, vis(".m-crate") + " && !document.querySelector('.pp')", 30 * fl.scale)

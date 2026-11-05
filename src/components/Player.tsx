@@ -2,6 +2,7 @@ import { Fragment, Suspense, lazy, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { Project } from '../data/projects';
 import { Cover } from './Cover';
+import { Insert } from './Insert';
 import { ArrowLeft, ArrowRight, GithubIcon } from './icons';
 import { use3D } from '../three/support';
 import './Player.css';
@@ -27,7 +28,7 @@ type Side = 'a' | 'b' | 'c';
 const SIDES: [Side, string][] = [
   ['a', 'Сторона A — о проекте'],
   ['b', 'Сторона B — стек'],
-  ['c', 'Бонус — ссылки'],
+  ['c', 'Вкладыш — кадры и ссылки'],
 ];
 
 /** Угол поворота элемента из его текущей CSS-матрицы — чтобы диск тормозил с того места, где был. */
@@ -44,6 +45,9 @@ export function Player({ project: p, code, nextTitle, leaving, onBack, onPrev, o
   const [side, setSide] = useState<Side>('a');
   const [stopAngle, setStopAngle] = useState(0);
   const [motor, setMotor] = useState(!use3D);
+  /** Дорожка, на которой стоит игла: каждый кадр вкладыша — отдельная дорожка. */
+  const [track, setTrack] = useState(0);
+  const tracks = p.shots?.length ?? 0;
   const spinRef = useRef<HTMLDivElement>(null);
 
   // Новая пластинка — всё с начала.
@@ -51,6 +55,7 @@ export function Player({ project: p, code, nextTitle, leaving, onBack, onPrev, o
     setSide('a');
     setStopAngle(0);
     setMotor(!use3D);
+    setTrack(0);
   }, [session]);
 
   const back = () => {
@@ -67,7 +72,7 @@ export function Player({ project: p, code, nextTitle, leaving, onBack, onPrev, o
       <div className={use3D ? 'deck deck-3d' : 'deck'}>
         {use3D ? (
           <Suspense fallback={null}>
-            <Player3D project={p} code={code} leaving={leaving} onMotor={setMotor} session={session} active={active} />
+            <Player3D project={p} code={code} leaving={leaving} onMotor={setMotor} session={session} active={active} track={track} tracks={tracks} />
           </Suspense>
         ) : (
           <Fragment key={session}>
@@ -131,7 +136,7 @@ export function Player({ project: p, code, nextTitle, leaving, onBack, onPrev, o
             <button className="btn" onClick={back}><ArrowLeft />Обратно в ящик</button>
             <span className="now-playing">
               <span className={L || !motor ? 'eq off' : 'eq'} aria-hidden="true"><span /><span /><span /></span>
-              {motor || !use3D ? 'Сейчас играет' : 'Пауза'} · {code}
+              {motor || !use3D ? 'Сейчас играет' : 'Пауза'} · {code}{tracks > 1 && use3D ? ` · дорожка ${track + 1}/${tracks}` : ''}
             </span>
           </div>
 
@@ -173,15 +178,13 @@ export function Player({ project: p, code, nextTitle, leaving, onBack, onPrev, o
               )}
               {side === 'c' && (
                 <>
-                  <div className="links">
+                  <Insert shots={p.shots} code={code} active={use3D && tracks > 1 ? track : -1} onSelect={setTrack} />
+                  <div className="links insert-links">
                     {p.github
                       ? <a className="btn primary" href={p.github} target="_blank" rel="noopener"><GithubIcon />GitHub</a>
                       : <span className="btn disabled">GitHub [ссылка]</span>}
-                    {p.demo
-                      ? <a className="btn" href={p.demo} target="_blank" rel="noopener">Демо ↗</a>
-                      : <span className="btn disabled">Демо [ссылка]</span>}
+                    {p.demo && <a className="btn" href={p.demo} target="_blank" rel="noopener">Демо ↗</a>}
                   </div>
-                  <p className="muted small">Скриншоты и презентация проекта появятся здесь.</p>
                 </>
               )}
             </div>

@@ -147,8 +147,18 @@ export function plasterBump() {
   return toTexture(cv, { srgb: false, repeat: [6, 4] });
 }
 
+/** Границы дорожек на виниле (доли радиуса): от начала записи до выбега. */
+export const GROOVE_OUTER = 0.94;
+export const GROOVE_INNER = 0.4;
+/** Радиусы межтрековых пауз для пластинки из `bands` дорожек. */
+export function trackGaps(bands: number): number[] {
+  const w = (GROOVE_OUTER - GROOVE_INNER) / bands;
+  return Array.from({ length: Math.max(0, bands - 1) }, (_, k) => GROOVE_OUTER - (k + 1) * w);
+}
+
 /** Лицевая сторона винила: бороздки, межтрековые паузы, этикетка с обложкой. */
-export function vinylTexture(cover: HTMLCanvasElement | null, labelColor = '#E0452C', S = 1024) {
+export function vinylTexture(cover: HTMLCanvasElement | null, labelColor = '#E0452C', S = 1024, bands = 4) {
+  const gaps = trackGaps(bands);
   const C = S / 2;
   const k = S / 1024;
   const { cv, ctx } = canvas(S, S);
@@ -156,7 +166,7 @@ export function vinylTexture(cover: HTMLCanvasElement | null, labelColor = '#E04
   ctx.beginPath(); ctx.arc(C, C, C, 0, Math.PI * 2); ctx.fill();
   for (let r = C * 0.36; r < C * 0.975; r += 1.6 * Math.max(1, k * 0.6)) {
     const t = r / C;
-    const gap = [0.53, 0.69, 0.84].some((g) => Math.abs(t - g) < 0.006);
+    const gap = gaps.some((g) => Math.abs(t - g) < 0.006);
     ctx.strokeStyle = gap ? '#050505' : (Math.floor(r / 1.6) % 2 ? '#141414' : '#0e0e0e');
     ctx.lineWidth = gap ? 2.4 * k : Math.max(1, k * 0.8);
     ctx.beginPath(); ctx.arc(C, C, r, 0, Math.PI * 2); ctx.stroke();

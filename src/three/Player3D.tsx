@@ -8,7 +8,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
 import type { Project } from '../data/projects';
 import { coverCanvas } from './coverCache';
-import { decalTexture, plankTexture, plasterTexture, rng, toTexture, vinylRoughness, vinylTexture } from './textures';
+import { GROOVE_INNER, GROOVE_OUTER, decalTexture, plankTexture, plasterTexture, rng, toTexture, vinylRoughness, vinylTexture } from './textures';
 import { makeCanvas } from '../util/canvas';
 
 interface Props {
@@ -17,6 +17,10 @@ interface Props {
   leaving: boolean;
   /** Сообщает наружу, крутится ли диск (для эквалайзера в карточке). */
   onMotor?: (running: boolean) => void;
+  /** Дорожка, на которую ставится игла (каждый кадр вкладыша — дорожка). */
+  track?: number;
+  /** Сколько дорожек на пластинке; 0 — кадров нет, обычные 4 дорожки. */
+  tracks?: number;
 }
 
 interface StageProps extends Props {
@@ -384,13 +388,39 @@ export function getKit() {
   return (kitInstance ??= buildKit());
 }
 
+const bandsOf = (p: Project) => Math.max(1, Math.min(6, p.shots?.length || 4));
+
+// Игла: точка иглы в системе тонарма (с учётом повёрнутой головки) и угол поворота под нужный радиус.
+const STYLUS_L: [number, number] = [0.01 * Math.sin(-0.42), ARM_LEN - 0.014 + 0.01 * Math.cos(-0.42)];
+function stylusRadius(yaw: number) {
+  const [lx, lz] = STYLUS_L;
+  const x = PIVOT[0] + lx * Math.cos(yaw) + lz * Math.sin(yaw);
+  const z = PIVOT[1] - lx * Math.sin(yaw) + lz * Math.cos(yaw);
+  return Math.hypot(x, z);
+}
+/** Угол тонарма, при котором игла встаёт на радиус r (м). Радиус монотонно падает при повороте к центру. */
+function yawForRadius(r: number) {
+  let lo = -1.1, hi = 0;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (stylusRadius(mid) > r) hi = mid; else lo = mid;
+  }
+  return (lo + hi) / 2;
+}
+/** Угол тонарма для начала дорожки k из n (0 — первая дорожка, как раньше). */
+function yawForTrack(k: number, n: number) {
+  if (n <= 1 || k <= 0) return YAW_PLAY;
+  const w = (GROOVE_OUTER - GROOVE_INNER) / n;
+  return yawForRadius((GROOVE_OUTER - k * w - 0.012) * REC_R);
+}
+
 const recordCache = new Map<string, THREE.Material[]>();
 /** Материал пластинки для проекта: обложка на этикетке, пыль, анизотропия. Кэшируется. */
 function recordMaterials(project: Project, code: string) {
   let mats = recordCache.get(project.id);
   if (!mats) {
     const kit = getKit();
-    const vinyl = dustOnVinyl(vinylTexture(coverCanvas(project, code, 1024), undefined, 1024), 7);
+    const vinyl = dustOnVinyl(vinylTexture(coverCanvas(project, code, 1024), undefined, 1024, bandsOf(project)), 7);
     const face = new THREE.MeshPhysicalMaterial({
       map: vinyl, roughnessMap: kit.vRough, roughness: 0.85,
       // Анизотропный блик по бороздкам + тонкий «лак» со следами пальцев и пылью
@@ -554,7 +584,7 @@ function Room() {
 
 // ---------- Проигрыватель ----------
 
-function Turntable({ project, code, leaving, onMotor }: Props) {
+function Turntable({ project, code, leaving, onMotor, track = 0, tracks = 0 }: Props) {
   const {
     walnut, geo, normals,
     armTube, aluPolished, plastic, platterMats, matMats,
@@ -581,12 +611,25 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
   speedRef.current = speed;
 
   useEffect(() => { onMotor?.(running && !leaving); }, [running, leaving, onMotor]);
+
+  // Переход иглы между дорожками: поднять → перенести → опустить.
+  const armTarget = useRef(yawForTrack(track, tracks));
+  const pending = useRef(false);
+  const move = useRef<{ from: number; to: number; t0: number; l0: number } | null>(null);
+  const cur = useRef({ yaw: YAW_REST, lift: 0 });
+  const leaveFrom = useRef({ yaw: YAW_PLAY, lift: 0 });
+  useEffect(() => {
+    const y = yawForTrack(track, tracks);
+    if (Math.abs(y - armTarget.current) < 1e-4) return;
+    armTarget.current = y;
+    pending.current = true;
+  }, [track, tracks]);
   useEffect(() => () => { document.body.style.cursor = ''; }, []);
 
   useFrame((state, dt) => {
     const now = state.clock.elapsedTime;
     if (start.current === null) start.current = now;
-    if (leaving && leaveAt.current === null) leaveAt.current = now;
+    if (leaving && leaveAt.current === null) { leaveAt.current = now; leaveFrom.current = { ...cur.current }; }
     const t = now - start.current;
 
     let rx = 0, ry = REC_Y, rz = 0, tilt = 0;
@@ -603,12 +646,36 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
       const d = smooth((t - IN.carry) / IN.drop);
       ry = lerp(CARRY_Y + 0.03 * (1 - c), REC_Y, d);
       tilt = 0.12 * (1 - c);
-      const lift = smooth((t - IN.liftAt) / IN.liftDur);
-      const swing = smooth((t - IN.swingAt) / IN.swingDur);
-      const lower = smooth((t - IN.lowerAt) / IN.lowerDur);
-      yaw = lerp(YAW_REST, YAW_PLAY, swing);
-      pitch = LIFT * (lift - lower);
-      cueA = lift - lower;
+      if (t < IN.lowerAt + IN.lowerDur) {
+        const lift = smooth((t - IN.liftAt) / IN.liftDur);
+        const swing = smooth((t - IN.swingAt) / IN.swingDur);
+        const lower = smooth((t - IN.lowerAt) / IN.lowerDur);
+        yaw = lerp(YAW_REST, armTarget.current, swing);
+        cueA = lift - lower;
+        pending.current = false;
+      } else {
+        if (pending.current) {
+          pending.current = false;
+          move.current = { from: cur.current.yaw, to: armTarget.current, t0: now, l0: cur.current.lift };
+        }
+        const mv = move.current;
+        if (mv) {
+          const u = now - mv.t0;
+          const LIFT_T = 0.22 * (1 - mv.l0);
+          const sw = 0.45 + Math.abs(mv.to - mv.from) * 1.6;
+          const up = mv.l0 + (1 - mv.l0) * smooth(u / Math.max(LIFT_T, 1e-3));
+          const s = smooth((u - LIFT_T) / sw);
+          const down = smooth((u - LIFT_T - sw) / 0.3);
+          yaw = lerp(mv.from, mv.to, s);
+          cueA = up * (1 - down);
+          if (down >= 1) move.current = null;
+        } else {
+          yaw = armTarget.current;
+        }
+      }
+      pitch = LIFT * cueA;
+      cur.current.yaw = yaw;
+      cur.current.lift = cueA;
       if (!autoStarted.current && t > IN.spinAt) {
         autoStarted.current = true;
         setRunning(true);
@@ -616,12 +683,13 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
       }
     } else {
       const u = now - leaveAt.current;
-      const lift = smooth(u / OUT.liftDur);
+      const L0 = leaveFrom.current;
+      const lift = L0.lift + (1 - L0.lift) * smooth(u / OUT.liftDur);
       const swing = smooth((u - OUT.swingAt) / OUT.swingDur);
       const lower = smooth((u - OUT.lowerAt) / OUT.lowerDur);
-      yaw = lerp(YAW_PLAY, YAW_REST, swing);
-      pitch = LIFT * (lift - lower);
-      cueA = lift - lower;
+      yaw = lerp(L0.yaw, YAW_REST, swing);
+      cueA = lift * (1 - lower);
+      pitch = LIFT * cueA;
       motor = false;
       // Сначала строго вверх, над тонармом…
       const up = smooth((u - OUT.recAt) / OUT.rise);

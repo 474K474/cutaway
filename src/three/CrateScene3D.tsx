@@ -33,8 +33,15 @@ const T = 0.016; // толщина доски
 const PLANK_H = 0.07;
 const GAP = 0.02;
 const WALL_H = T + 3 * PLANK_H + 2 * GAP;
-const SPACING = 0.062;
-const zOf = (i: number) => D / 2 - T - 0.06 - i * SPACING;
+const INNER_Z = D / 2 - T; // внутренняя грань торцевых стенок
+const N_REC = projects.length;
+// Стопка центрирована в ящике; чем больше пластинок, тем плотнее они стоят.
+const SPACING = Math.min(0.062, (2 * (INNER_Z - 0.06)) / Math.max(1, N_REC - 1));
+const zOf = (i: number) => ((N_REC - 1) / 2 - i) * SPACING;
+// Наклон ограничен стенкой: на высоте её верхнего края конверт не должен выйти за внутреннюю грань.
+const LEAN_ROOM = Math.asin(Math.min(1, (INNER_Z - 0.006 - zOf(0) - SLEEVE_T / 2) / (WALL_H - T)));
+const LEAN_FWD = Math.min(0.2, LEAN_ROOM);
+const LEAN_BACK = Math.min(0.23, LEAN_ROOM);
 const DIVIDER_AFTER = projects.findIndex((p) => p.side === 'B') - 1;
 const CRATE_YAW = 0.78;
 
@@ -299,8 +306,8 @@ function Crate() {
   const sideX = W / 2 - T / 2;
   const endZ = D / 2 - T / 2;
   const inner = W - 2 * T;
-  const postX = W / 2 - T - 0.015;
-  const postZ = D / 2 - T - 0.015;
+  const postX = W / 2 - T - 0.011;
+  const postZ = D / 2 - T - 0.011;
 
   return (
     <group>
@@ -323,7 +330,7 @@ function Crate() {
         </group>
       ))}
       {[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz], k) => (
-        <Plank key={k} size={[0.03, WALL_H - T, 0.03]} position={[sx * postX, T + (WALL_H - T) / 2, sz * postZ]} tex={planks[(k + 1) % 6]} />
+        <Plank key={k} size={[0.022, WALL_H - T, 0.022]} position={[sx * postX, T + (WALL_H - T) / 2, sz * postZ]} tex={planks[(k + 1) % 6]} />
       ))}
       {/* Наклейка и штамп */}
       <mesh position={[0, rows[0], D / 2 + 0.0008]} rotation-z={-0.03}>
@@ -354,8 +361,8 @@ function poseFor(i: number, hv: number, gone: boolean) {
   if (gone && i === hv) return { y: 1.5, rot: 0.04, peek: 0 };
   if (hv < 0) return { y: 0, rot: -0.14, peek: 0 };
   if (i === hv) return { y: 0.235, rot: 0.04, peek: 0.1 };
-  if (i < hv) return { y: 0, rot: 0.2, peek: 0 };
-  return { y: 0, rot: -0.23, peek: 0 };
+  if (i < hv) return { y: 0, rot: LEAN_FWD, peek: 0 };
+  return { y: 0, rot: -LEAN_BACK, peek: 0 };
 }
 
 function RecordMesh({ index, hovered, gone, front, vinyl, vinylRough, card }: RecordProps) {
@@ -406,8 +413,8 @@ function Divider({ hovered }: { hovered: number }) {
     const g = group.current;
     if (!g) return;
     let rot = -0.14;
-    if (hovered > DIVIDER_AFTER) rot = 0.2;
-    else if (hovered >= 0) rot = -0.23;
+    if (hovered > DIVIDER_AFTER) rot = LEAN_FWD;
+    else if (hovered >= 0) rot = -LEAN_BACK;
     g.rotation.x = damp(g.rotation.x, rot, 3.6, dt);
   });
   return (

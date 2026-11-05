@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent } from 'react';
 import type { Project } from '../data/projects';
 import { tick } from './assets';
+import { Insert } from '../components/Insert';
 
 interface Props {
   project: Project;
@@ -15,7 +16,7 @@ interface Props {
 }
 
 type Side = 'a' | 'b' | 'c';
-const SIDES: [Side, string][] = [['a', 'О проекте'], ['b', 'Стек'], ['c', 'Ссылки']];
+const SIDES: [Side, string][] = [['a', 'О проекте'], ['b', 'Стек'], ['c', 'Вкладыш']];
 
 const RPM = { 33: (33.33 / 60) * Math.PI * 2, 45: (45 / 60) * Math.PI * 2 } as const;
 const ARM_PLAY = 24; // градусы
@@ -190,12 +191,13 @@ export function PhonePlayer({ project: p, code, cover, nextTitle, leaving, onBac
             {side === 'b' && (
               <ol className="stack">{p.stack.map((s, j) => <li key={s + j}><span className="serif">{String(j + 1).padStart(2, '0')}</span>{s}</li>)}</ol>
             )}
-            {side === 'c' && (
-              <div className="links">
+            {side === 'c' && (<>
+              <Insert shots={p.shots} code={code} />
+              <div className="links insert-links">
                 {p.github ? <a className="btn primary" href={p.github} target="_blank" rel="noopener">GitHub</a> : <span className="btn disabled">GitHub [ссылка]</span>}
-                {p.demo ? <a className="btn" href={p.demo} target="_blank" rel="noopener">Демо ↗</a> : <span className="btn disabled">Демо [ссылка]</span>}
+                {p.demo && <a className="btn" href={p.demo} target="_blank" rel="noopener">Демо ↗</a>}
               </div>
-            )}
+            </>)}
           </div>
         </div>
         <div className="r4 pp-nav">

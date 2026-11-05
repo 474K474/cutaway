@@ -9,6 +9,17 @@ export interface Sticker {
   fg: string;
 }
 
+/** Кадр для «вкладыша»: скриншот в рамке под тип проекта. */
+export interface Shot {
+  /** Путь от корня сайта, например `shots/ym-vinil/shelf.webp` (файлы лежат в public/) */
+  src: string;
+  caption: string;
+  /** browser — сайт, app — окно приложения, phone — телефон (боты, мини-аппы) */
+  frame: 'browser' | 'app' | 'phone';
+  /** Подпись в адресной строке/заголовке окна */
+  title?: string;
+}
+
 export interface Project {
   id: string;
   title: string;
@@ -34,6 +45,8 @@ export interface Project {
   stack: string[];
   github?: string;
   demo?: string;
+  /** Кадры для вкладыша (до 6). Каждый кадр — дорожка на пластинке. */
+  shots?: Shot[];
 }
 
 export const projects: Project[] = [
@@ -102,6 +115,12 @@ export const projects: Project[] = [
     role: 'автор: идея, дизайн, разработка',
     stack: ['Tauri 2 · Rust', 'React 19 + TypeScript', 'Zustand · Motion', 'Web Audio', 'Vitest · GitHub Actions'],
     github: 'https://github.com/474K474/YM_vinil',
+    shots: [
+      { src: 'shots/ym-vinil/shelf.webp', caption: 'Полка: плейлисты и альбомы стоят конвертами', frame: 'app', title: 'YM Vinil' },
+      { src: 'shots/ym-vinil/playing.webp', caption: 'Пластинка на проигрывателе, игла на первой дорожке', frame: 'app', title: 'YM Vinil' },
+      { src: 'shots/ym-vinil/sleeve-back.webp', caption: 'Обратная сторона конверта — треклист по сторонам A и B', frame: 'app', title: 'YM Vinil' },
+      { src: 'shots/ym-vinil/fullscreen.webp', caption: 'Полноэкранный режим: только проигрыватель', frame: 'app', title: 'YM Vinil — полный экран' },
+    ],
   },
   {
     id: 'kod-vremeni',
