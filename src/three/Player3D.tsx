@@ -9,7 +9,7 @@ import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLigh
 import type { Project } from '../data/projects';
 import { coverCanvas } from './coverCache';
 import { decalTexture, plankTexture, plasterTexture, rng, toTexture, vinylRoughness, vinylTexture } from './textures';
-import { addGrain, makeCanvas } from '../util/canvas';
+import { makeCanvas } from '../util/canvas';
 
 interface Props {
   project: Project;
@@ -27,24 +27,29 @@ interface StageProps extends Props {
 }
 
 // ---------- Геометрия (метры) ----------
-// Верх деки — y = 0, центр платтера — начало координат. Пропорции близки к реальному Technics.
-const BODY = { x0: -0.19, x1: 0.27, z0: -0.18, z1: 0.18, h: 0.075 };
+// Верх деки — y = 0, центр платтера — начало координат.
+// Стиль — немецкий проигрыватель 60-х: ореховая рамка, светлая алюминиевая панель, чёрная планка тонарма справа.
+const BODY = { x0: -0.2, x1: 0.29, z0: -0.2, z1: 0.2, h: 0.07 };
+const FRAME = 0.016; // ширина ореховой рамки
+const BOARD_X0 = 0.19; // начало чёрной планки тонарма
+const BOARD_X1 = BODY.x1 - FRAME;
+const PLATE = { x0: BODY.x0 + FRAME, x1: BOARD_X0, z0: BODY.z0 + FRAME, z1: BODY.z1 - FRAME };
 const BODY_W = BODY.x1 - BODY.x0;
 const BODY_D = BODY.z1 - BODY.z0;
 const BODY_CX = (BODY.x0 + BODY.x1) / 2;
-const PLATTER_R = 0.166;
+const PLATTER_R = 0.153;
 const PLATTER_Y0 = 0.002;
-const PLATTER_H = 0.03;
+const PLATTER_H = 0.022;
 const MAT_T = 0.003;
 const MAT_Y = PLATTER_Y0 + PLATTER_H + MAT_T / 2;
 const REC_R = 0.15;
 const REC_T = 0.0018;
 const REC_Y = PLATTER_Y0 + PLATTER_H + MAT_T + REC_T / 2;
-const PIVOT: [number, number] = [0.185, -0.1];
-const ARM_Y = 0.0505;
-const ARM_LEN = 0.222;
-const YAW_REST = 0.05;
-const YAW_PLAY = -0.45;
+const PIVOT: [number, number] = [(BOARD_X0 + BOARD_X1) / 2, -0.15];
+const ARM_Y = 0.043;
+const ARM_LEN = 0.24;
+const YAW_REST = 0;
+const YAW_PLAY = -0.48; // игла попадает на начало дорожки (≈0.136 м от центра)
 const LIFT = -0.075;
 const RPM = { 33: (33.33 / 60) * Math.PI * 2, 45: (45 / 60) * Math.PI * 2 } as const;
 
@@ -62,17 +67,6 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 const canvas = makeCanvas;
 
-/** Матовая чёрная панель: мелкая неровность порошковой краски, без полос. */
-function matteBlack() {
-  const { cv, ctx } = canvas(512, 512);
-  ctx.fillStyle = '#191817';
-  ctx.fillRect(0, 0, 512, 512);
-  addGrain(ctx, 512, 0.1);
-  const t = toTexture(cv);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(3, 3);
-  return t;
-}
 
 /** Стробоскопические точки на боковине платтера (три ряда — 50/60 Гц и 45 об/мин). */
 function strobeTexture() {
@@ -108,14 +102,6 @@ function rubberMat() {
   return toTexture(cv);
 }
 
-/** Насечка на противовесе. */
-function knurl() {
-  const { cv, ctx } = canvas(256, 64);
-  ctx.fillStyle = '#9d9d9d';
-  ctx.fillRect(0, 0, 256, 64);
-  for (let x = 0; x < 256; x += 4) { ctx.fillStyle = '#5c5c5c'; ctx.fillRect(x, 0, 2, 64); }
-  return toTexture(cv);
-}
 
 /**
  * Направление анизотропии винила: по касательной к бороздкам.
@@ -223,6 +209,32 @@ function dustOnVinyl(tex: THREE.Texture, seed: number) {
   return tex;
 }
 
+/** Шкала переключателя скоростей: 16 · 33 · 45 · 78 по кругу. */
+function speedDialTexture() {
+  const S = 512, C = S / 2;
+  const { cv, ctx } = canvas(S, S);
+  const g = ctx.createRadialGradient(C * 0.8, C * 0.7, 10, C, C, C);
+  g.addColorStop(0, '#f4f3ef'); g.addColorStop(0.6, '#cfcdc8'); g.addColorStop(1, '#8f8d88');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, S, S);
+  ctx.strokeStyle = 'rgba(0,0,0,.12)';
+  for (let r = 40; r < C; r += 3) { ctx.beginPath(); ctx.arc(C, C, r, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.fillStyle = '#1a1a1a';
+  ctx.font = '700 64px Onest, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const marks: [string, number][] = [['16', -2.3], ['33', -0.8], ['45', 0.8], ['78', 2.3]];
+  for (const [t, a] of marks) {
+    ctx.save();
+    ctx.translate(C + Math.sin(a) * C * 0.72, C - Math.cos(a) * C * 0.72);
+    ctx.rotate(a);
+    ctx.fillStyle = t === '33' || t === '45' ? '#b8341f' : '#1a1a1a';
+    ctx.fillText(t, 0, 0);
+    ctx.restore();
+  }
+  return toTexture(cv);
+}
+
 /** Фаска верхней кромки платтера — полированный поясок, на котором ловится блик. */
 function chamferRing(R: number, h: number) {
   const pts = [
@@ -303,6 +315,11 @@ function buildKit() {
     cueBox: new RoundedBoxGeometry(0.014, 0.012, 0.028, 2, 0.003),
     hinge: new RoundedBoxGeometry(0.04, 0.012, 0.016, 2, 0.003),
     chamfer: chamferRing(PLATTER_R, 0.004),
+    vplate: new RoundedBoxGeometry(PLATE.x1 - PLATE.x0, 0.004, PLATE.z1 - PLATE.z0, 2, 0.0015),
+    board: new RoundedBoxGeometry(BOARD_X1 - BOARD_X0, 0.006, PLATE.z1 - PLATE.z0, 2, 0.002),
+    armBox: new RoundedBoxGeometry(0.03, 0.022, 0.05, 3, 0.004),
+    armWeight: new RoundedBoxGeometry(0.026, 0.02, 0.034, 3, 0.003),
+    shell: new RoundedBoxGeometry(0.022, 0.005, 0.048, 2, 0.0018),
   };
   // Материалы: шлифованный алюминий с анизотропным бликом, матовая порошковая краска, резина.
   const rubber = new THREE.MeshStandardMaterial({ color: '#0d0d0d', roughness: 0.92, normalMap: normals.rubber, normalScale: new THREE.Vector2(0.3, 0.3) });
@@ -314,8 +331,6 @@ function buildKit() {
   })();
   return {
     walnut: plankTexture(4),
-    black: matteBlack(),
-    knurlTex: knurl(),
     vRough: vinylRoughness(),
     aniso: vinylAniso(),
     ccMask,
@@ -337,6 +352,17 @@ function buildKit() {
     ],
     matMats: [rubber, new THREE.MeshStandardMaterial({ map: mat, roughness: 0.9, normalMap: normals.rubber, normalScale: new THREE.Vector2(0.35, 0.35) }), rubber],
     recordEdge: new THREE.MeshStandardMaterial({ color: '#0e0e0e', roughness: 0.32 }),
+    // Светлая сатинированная алюминиевая панель, как на проигрывателях 60-х
+    plateAlu: new THREE.MeshPhysicalMaterial({
+      color: '#a9a7a1', metalness: 0.65, roughness: 1, roughnessMap: (() => { const t = grimes.plate.clone(); t.needsUpdate = true; return t; })(),
+      anisotropy: 0.45, normalMap: brushedFine, normalScale: new THREE.Vector2(0.08, 0.08), clearcoat: 0.15, clearcoatRoughness: 0.4,
+    }),
+    // Чёрная планка тонарма — гладкий лакированный пластик
+    boardMat: new THREE.MeshPhysicalMaterial({ color: '#0f0f0f', metalness: 0, roughness: 0.55, roughnessMap: grimes.plastic, clearcoat: 0.55, clearcoatRoughness: 0.2 }),
+    chrome: new THREE.MeshPhysicalMaterial({ color: '#e4e3df', metalness: 1, roughness: 0.16, roughnessMap: grimes.metal }),
+    hook: new THREE.MeshPhysicalMaterial({ color: '#b9b8b3', metalness: 0.2, roughness: 0.4, clearcoat: 0.5 }),
+    dial: speedDialTexture(),
+    badge: decalTexture(['M.S.  studio'], { w: 512, h: 112, font: '600 64px Onest, sans-serif', color: '#d8d6d0', bg: '#141414', spacing: 6 }),
     table: (() => {
       const t = plankTexture(1);
       t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -526,8 +552,9 @@ function Room() {
 
 function Turntable({ project, code, leaving, onMotor }: Props) {
   const {
-    walnut, black, knurlTex, grimes, geo, normals,
-    alu, armTube, aluPolished, aluDark, blackMetal, plastic, rubber, platterMats, matMats,
+    walnut, geo, normals,
+    armTube, aluPolished, plastic, platterMats, matMats,
+    plateAlu, boardMat, chrome, hook, dial, badge,
   } = getKit();
   const recordMats = useMemo(() => recordMaterials(project, code), [project, code]);
 
@@ -615,47 +642,26 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
 
   return (
     <group>
-      {/* Корпус: ореховый плинт на демпфирующих ножках, сверху матовая чёрная панель */}
-      <mesh position={[BODY_CX, -BODY.h / 2 - 0.004, 0]} castShadow receiveShadow geometry={geo.body}>
-        <meshPhysicalMaterial map={walnut} color="#6e4c33" roughness={0.55} normalMap={normals.wood} normalScale={new THREE.Vector2(0.35, 0.35)} clearcoat={0.35} clearcoatRoughness={0.35} />
+      {/* Корпус: ореховая рамка */}
+      <mesh position={[BODY_CX, -BODY.h / 2, 0]} castShadow receiveShadow geometry={geo.body}>
+        <meshPhysicalMaterial map={walnut} color="#5e3a22" roughness={0.5} normalMap={normals.wood} normalScale={new THREE.Vector2(0.35, 0.35)} clearcoat={0.5} clearcoatRoughness={0.3} />
       </mesh>
-      {/* Анодированная верхняя панель: матовая, но со следами рук и пылью */}
-      <mesh position={[BODY_CX, -0.002, 0]} receiveShadow geometry={geo.plate}>
-        <meshPhysicalMaterial map={black} color="#a19d98" metalness={0.45} roughness={1} roughnessMap={grimes.plate} normalMap={normals.powder} normalScale={new THREE.Vector2(0.22, 0.22)} />
-      </mesh>
-      {[[BODY.x0 + 0.04, BODY.z0 + 0.04], [BODY.x1 - 0.04, BODY.z0 + 0.04], [BODY.x0 + 0.04, BODY.z1 - 0.04], [BODY.x1 - 0.04, BODY.z1 - 0.04]].map(([x, z], i) => (
-        <group key={i} position={[x, -BODY.h - 0.004, z]}>
-          <mesh position={[0, -0.009, 0]} castShadow material={aluDark}>
-            <cylinderGeometry args={[0.028, 0.03, 0.018, 40]} />
-          </mesh>
-          <mesh position={[0, -0.0175, 0]} material={rubber}>
-            <cylinderGeometry args={[0.026, 0.026, 0.003, 40]} />
-          </mesh>
-        </group>
-      ))}
+      {/* Светлая алюминиевая панель — чуть утоплена в рамку */}
+      <mesh position={[(PLATE.x0 + PLATE.x1) / 2, -0.0012, (PLATE.z0 + PLATE.z1) / 2]} receiveShadow geometry={geo.vplate} material={plateAlu} />
+      {/* Чёрная планка тонарма справа */}
+      <mesh position={[(BOARD_X0 + BOARD_X1) / 2, -0.0005, (PLATE.z0 + PLATE.z1) / 2]} receiveShadow castShadow geometry={geo.board} material={boardMat} />
 
-      {/* Платтер со стробоскопом, резиновый мат, шпиндель */}
+      {/* Платтер (почти не виден из-под пластинки), резиновый мат, шпиндель */}
       <mesh position={[0, PLATTER_Y0 + PLATTER_H / 2, 0]} castShadow receiveShadow material={platterMats}>
         <cylinderGeometry args={[PLATTER_R, PLATTER_R, PLATTER_H, 160, 1]} />
       </mesh>
       <mesh position={[0, PLATTER_Y0 + PLATTER_H + 0.0001, 0]} geometry={geo.chamfer} material={aluPolished} />
       <mesh position={[0, MAT_Y, 0]} receiveShadow material={matMats}>
-        <cylinderGeometry args={[REC_R + 0.002, REC_R + 0.002, MAT_T, 128]} />
+        <cylinderGeometry args={[REC_R + 0.001, REC_R + 0.001, MAT_T, 128]} />
       </mesh>
-      <mesh position={[0, MAT_Y + 0.011, 0]} castShadow material={alu}>
+      <mesh position={[0, MAT_Y + 0.011, 0]} castShadow material={chrome}>
         <cylinderGeometry args={[0.0036, 0.0036, 0.02, 24]} />
       </mesh>
-
-      {/* Стробоскопическая лампа подсвечивает точки на платтере */}
-      <group position={[-0.165, 0, 0.122]}>
-        <mesh position={[0, 0.012, 0]} castShadow material={blackMetal}>
-          <cylinderGeometry args={[0.011, 0.012, 0.024, 24]} />
-        </mesh>
-        <mesh position={[0.004, 0.018, -0.004]}>
-          <sphereGeometry args={[0.004, 12, 12]} />
-          <meshStandardMaterial color="#ff8a3c" emissive="#ff7a2c" emissiveIntensity={1.4} />
-        </mesh>
-      </group>
 
       {/* Пластинка */}
       <group ref={record}>
@@ -666,43 +672,40 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
         </group>
       </group>
 
-      {/* Тонарм */}
+      {/* Тонарм: угловатый блок-ось, прямая трубка квадратного сечения, плоская головка */}
       <group position={[PIVOT[0], 0, PIVOT[1]]}>
-        <mesh position={[0, 0.005, 0]} castShadow receiveShadow material={blackMetal}>
-          <cylinderGeometry args={[0.04, 0.042, 0.01, 64]} />
-        </mesh>
-        <mesh position={[0, 0.0105, 0]} material={aluDark}>
-          <cylinderGeometry args={[0.036, 0.036, 0.001, 64]} />
-        </mesh>
-        <mesh position={[0, 0.02, 0]} castShadow material={alu}>
-          <cylinderGeometry args={[0.02, 0.024, 0.018, 48]} />
+        <mesh position={[0, 0.006, 0]} castShadow receiveShadow material={boardMat}>
+          <cylinderGeometry args={[0.022, 0.024, 0.012, 48]} />
         </mesh>
         <group ref={armYaw}>
-          <mesh position={[0, 0.036, 0]} castShadow material={blackMetal} geometry={geo.pivotBlock} />
+          {/* Корпус оси — серебристый блок с чёрной крышкой */}
+          <mesh position={[0, 0.028, 0.006]} castShadow geometry={geo.armBox} material={chrome} />
+          <mesh position={[0, 0.0395, 0.006]} castShadow material={boardMat}>
+            <boxGeometry args={[0.026, 0.002, 0.042]} />
+          </mesh>
           <group ref={armPitch} position={[0, ARM_Y, 0]}>
-            <mesh position={[0, 0, ARM_LEN / 2 - 0.012]} rotation-x={Math.PI / 2} castShadow material={armTube}>
-              <cylinderGeometry args={[0.004, 0.004, ARM_LEN - 0.024, 24]} />
+            {/* Противовес — блок позади оси */}
+            <mesh position={[0, -0.004, -0.038]} castShadow geometry={geo.armWeight} material={chrome} />
+            <mesh position={[0, 0.0065, -0.038]} material={boardMat}>
+              <boxGeometry args={[0.02, 0.0012, 0.026]} />
             </mesh>
-            <mesh position={[0, 0, -0.022]} rotation-x={Math.PI / 2} castShadow material={aluDark}>
-              <cylinderGeometry args={[0.005, 0.005, 0.03, 16]} />
+            {/* Трубка */}
+            <mesh position={[0, -0.006, ARM_LEN / 2 + 0.006]} castShadow material={armTube}>
+              <boxGeometry args={[0.0075, 0.0075, ARM_LEN - 0.034]} />
             </mesh>
-            <mesh position={[0, 0, -0.054]} rotation-x={Math.PI / 2} castShadow>
-              <cylinderGeometry args={[0.016, 0.016, 0.03, 40]} />
-              <meshPhysicalMaterial map={knurlTex} metalness={1} roughness={0.38} anisotropy={0.6} />
-            </mesh>
-            <mesh position={[0, 0, -0.07]} rotation-x={Math.PI / 2} material={blackMetal}>
-              <cylinderGeometry args={[0.0165, 0.0165, 0.003, 40]} />
-            </mesh>
-            {/* Головка: корпус, пальчик-лифт, картридж, игла */}
-            <group position={[0, -0.004, ARM_LEN - 0.013]} rotation-y={-0.36}>
-              <mesh castShadow material={plastic} geometry={geo.headshell} />
-              <mesh position={[0.016, 0.0005, -0.008]} rotation-z={0.25} castShadow material={alu}>
-                <boxGeometry args={[0.016, 0.0016, 0.004]} />
+            {/* Головка: плоская, под углом, с пальчиком-лифтом */}
+            <group position={[0, -0.009, ARM_LEN - 0.014]} rotation-y={-0.42}>
+              <mesh castShadow geometry={geo.shell} material={boardMat} />
+              <mesh position={[0, 0.0028, 0]} material={chrome}>
+                <boxGeometry args={[0.016, 0.0006, 0.04]} />
               </mesh>
-              <mesh position={[0, -0.007, 0.004]} castShadow geometry={geo.cart}>
-                <meshPhysicalMaterial color="#b8341f" roughness={0.4} clearcoat={0.6} clearcoatRoughness={0.25} />
+              <mesh position={[0.019, 0.001, 0.008]} rotation-z={0.3} castShadow material={chrome}>
+                <boxGeometry args={[0.018, 0.0016, 0.006]} />
               </mesh>
-              <mesh position={[0, -0.0128, 0.011]} material={alu}>
+              <mesh position={[0, -0.006, 0.004]} castShadow material={plastic}>
+                <boxGeometry args={[0.014, 0.008, 0.018]} />
+              </mesh>
+              <mesh position={[0, -0.0112, 0.01]} material={chrome}>
                 <cylinderGeometry args={[0.0005, 0.0003, 0.003, 8]} />
               </mesh>
             </group>
@@ -710,69 +713,76 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
         </group>
       </group>
 
-      {/* Подставка тонарма с зажимом */}
-      <group position={[0.195, 0, 0.09]}>
-        <mesh position={[0, 0.022, 0]} castShadow material={blackMetal}>
-          <cylinderGeometry args={[0.0045, 0.006, 0.044, 16]} />
+      {/* Подставка тонарма — светло-серый крючок */}
+      <group position={[PIVOT[0] + 0.004, 0, PIVOT[1] + ARM_LEN - 0.075]}>
+        <mesh position={[0, 0.016, 0]} castShadow material={hook}>
+          <boxGeometry args={[0.006, 0.032, 0.006]} />
         </mesh>
-        <mesh position={[0, 0.0455, 0]} castShadow material={rubber}>
-          <boxGeometry args={[0.018, 0.005, 0.009]} />
+        <mesh position={[0.006, 0.031, 0]} castShadow material={hook}>
+          <boxGeometry args={[0.016, 0.004, 0.008]} />
         </mesh>
       </group>
 
-      {/* Микролифт, антискейтинг, адаптер 45 */}
-      <group position={[0.24, 0, -0.045]}>
-        <mesh position={[0, 0.006, 0]} castShadow material={blackMetal} geometry={geo.cueBox} />
-        <group ref={cue} position={[0, 0.012, 0.008]}>
-          <mesh position={[0, 0.011, 0]} castShadow material={alu}>
-            <boxGeometry args={[0.003, 0.022, 0.003]} />
+      {/* Рычаг подъёма (микролифт) */}
+      <group position={[BOARD_X1 - 0.014, 0, -0.07]}>
+        <mesh position={[0, 0.004, 0]} castShadow material={boardMat}>
+          <boxGeometry args={[0.012, 0.008, 0.024]} />
+        </mesh>
+        <group ref={cue} position={[0, 0.008, 0.006]}>
+          <mesh position={[0, 0.007, 0]} castShadow material={chrome}>
+            <boxGeometry args={[0.004, 0.014, 0.004]} />
           </mesh>
         </group>
       </group>
-      <mesh position={[0.24, 0.006, -0.11]} castShadow material={blackMetal}>
-        <cylinderGeometry args={[0.012, 0.013, 0.012, 40]} />
-      </mesh>
-      <mesh position={[0.24, 0.0122, -0.11]} material={alu}>
-        <boxGeometry args={[0.002, 0.0004, 0.01]} />
-      </mesh>
-      <mesh position={[0.235, 0.004, 0.012]} castShadow receiveShadow material={alu}>
-        <cylinderGeometry args={[0.018, 0.018, 0.008, 48]} />
-      </mesh>
-      <mesh position={[0.235, 0.0082, 0.012]} material={blackMetal}>
-        <cylinderGeometry args={[0.0075, 0.0075, 0.001, 32]} />
+      <Engrave text="LIFT" x={BOARD_X1 - 0.014} z={-0.092} w={0.018} />
+
+      {/* Переключатель скоростей — круглая хромированная ручка (клик: 33 ↔ 45) */}
+      <group position={[(BOARD_X0 + BOARD_X1) / 2 + 0.006, 0, PLATE.z1 - 0.032]}>
+        <mesh position={[0, 0.002, 0]} receiveShadow material={boardMat}>
+          <cylinderGeometry args={[0.03, 0.03, 0.004, 64]} />
+        </mesh>
+        <mesh
+          position={[0, 0.008, 0]}
+          rotation-y={speed === 33 ? 0.8 : -0.8}
+          castShadow
+          onClick={(e) => { e.stopPropagation(); setSpeed((v) => (v === 33 ? 45 : 33)); }}
+          onPointerOver={(e) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; }}
+          onPointerOut={() => { document.body.style.cursor = ''; }}
+        >
+          <cylinderGeometry args={[0.024, 0.025, 0.01, 64]} />
+          <meshPhysicalMaterial attach="material-0" color="#bdbbb6" metalness={1} roughness={0.3} />
+          <meshPhysicalMaterial attach="material-1" map={dial} metalness={0.6} roughness={0.28} clearcoat={0.8} />
+          <meshPhysicalMaterial attach="material-2" color="#8a8884" metalness={1} roughness={0.4} />
+        </mesh>
+        <mesh position={[0, 0.0135, 0]} material={chrome}>
+          <cylinderGeometry args={[0.009, 0.01, 0.002, 40]} />
+        </mesh>
+        {/* Указатель */}
+        <mesh position={[0, 0.0034, -0.028]}>
+          <boxGeometry args={[0.0018, 0.0006, 0.004]} />
+          <meshStandardMaterial color="#e8e2d8" />
+        </mesh>
+      </group>
+
+      {/* START·STOP — красная клавиша-индикатор на нижней кромке панели */}
+      <PushButton
+        position={[0.105, 0, PLATE.z1 - 0.013]}
+        size={[0.026, 0.004, 0.011]}
+        color={running ? '#d8402a' : '#6e1a12'}
+        active={running}
+        label="start-stop"
+        onPress={() => { if (!busy()) setRunning((r) => !r); }}
+      />
+      <mesh position={[0.105, 0.0062, PLATE.z1 - 0.013]}>
+        <boxGeometry args={[0.02, 0.0004, 0.006]} />
+        <meshStandardMaterial ref={led} color="#ff5a3c" emissive="#ff3a1c" emissiveIntensity={0.1} transparent opacity={0.8} />
       </mesh>
 
-      {/* Питч-фейдер */}
-      <mesh position={[0.24, 0.0003, 0.11]} receiveShadow>
-        <boxGeometry args={[0.006, 0.0008, 0.1]} />
-        <meshStandardMaterial color="#030303" roughness={1} />
+      {/* Шильдик */}
+      <mesh position={[PLATE.x0 + 0.05, 0.0012, PLATE.z1 - 0.013]} rotation-x={-Math.PI / 2}>
+        <planeGeometry args={[0.07, 0.0153]} />
+        <meshStandardMaterial map={badge} metalness={0.3} roughness={0.4} />
       </mesh>
-      <mesh position={[0.24, 0.006, 0.11]} castShadow material={plastic} geometry={geo.fader} />
-      <mesh position={[0.24, 0.0118, 0.11]}>
-        <boxGeometry args={[0.016, 0.0006, 0.0016]} />
-        <meshStandardMaterial color="#e8e2d8" roughness={0.6} />
-      </mesh>
-
-      {/* Кнопки: старт/стоп и скорость — кликабельные */}
-      <PushButton position={[-0.135, 0, 0.15]} size={[0.056, 0.008, 0.03]} label="start-stop" onPress={() => { if (!busy()) setRunning((r) => !r); }} />
-      <PushButton position={[-0.06, 0, 0.162]} size={[0.02, 0.006, 0.012]} color={speed === 33 ? '#3a3633' : '#242120'} active={speed === 33} label="33" onPress={() => setSpeed(33)} />
-      <PushButton position={[-0.034, 0, 0.162]} size={[0.02, 0.006, 0.012]} color={speed === 45 ? '#3a3633' : '#242120'} active={speed === 45} label="45" onPress={() => setSpeed(45)} />
-      <mesh position={[-0.06 + (speed === 33 ? 0 : 0.026), 0.0015, 0.152]}>
-        <sphereGeometry args={[0.0016, 12, 12]} />
-        <meshStandardMaterial ref={led} color="#ff5a3c" emissive="#ff4a2c" emissiveIntensity={0.1} />
-      </mesh>
-
-      {/* Гравировки */}
-      <Engrave text="START · STOP" x={-0.135} z={0.172} w={0.05} />
-      <Engrave text="33" x={-0.06} z={0.175} w={0.014} />
-      <Engrave text="45" x={-0.034} z={0.175} w={0.014} />
-      <Engrave text="PITCH" x={0.24} z={0.168} w={0.026} />
-      <Engrave text="ANTI-SKATE" x={0.24} z={-0.128} w={0.034} />
-      <Engrave text="M.S. · SL-01  DIRECT DRIVE" x={-0.06} z={-0.17} w={0.11} />
-
-      {[BODY.x0 + 0.07, BODY.x1 - 0.07].map((x) => (
-        <mesh key={x} position={[x, 0.004, BODY.z0 + 0.008]} castShadow material={blackMetal} geometry={geo.hinge} />
-      ))}
     </group>
   );
 }
@@ -809,8 +819,8 @@ export default function Player3D({ session, active, ...props }: StageProps) {
       frameloop={active ? 'always' : 'never'}
       shadows={{ type: THREE.VSMShadowMap }}
       dpr={[1, 1.5]}
-      camera={{ position: [0.16, 0.56, 0.14], fov: 36, near: 0.01, far: 6 }}
-      onCreated={({ camera }) => camera.lookAt(0.16, 0, 0.005)}
+      camera={{ position: [0.165, 0.655, 0.115], fov: 36, near: 0.01, far: 6 }}
+      onCreated={({ camera }) => camera.lookAt(0.165, 0, -0.008)}
       gl={{ antialias: true, powerPreference: 'high-performance', toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.0 }}
     >
       <color attach="background" args={['#0d0907']} />
