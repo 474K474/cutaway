@@ -6,8 +6,6 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
-import { EffectComposer, N8AO, ToneMapping, Vignette } from '@react-three/postprocessing';
-import { ToneMappingMode } from 'postprocessing';
 // CC0-ассеты (Poly Haven через @pmndrs/assets): HDRI-окружение и карты нормалей.
 import hdri from '@pmndrs/assets/hdri/apartment.exr';
 import nBrushed from '@pmndrs/assets/normals/0004.webp';
@@ -729,12 +727,6 @@ export default function Player3D(props: Props) {
       <Lights />
       <Room />
       <Turntable {...props} />
-      {/* Контактные тени в щелях и под деталями + мягкая виньетка */}
-      <EffectComposer multisampling={4}>
-        <N8AO aoRadius={0.025} distanceFalloff={0.6} intensity={2.4} halfRes color="#120a05" />
-        <Vignette offset={0.32} darkness={0.55} />
-        <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
-      </EffectComposer>
     </Canvas>
   );
 }
