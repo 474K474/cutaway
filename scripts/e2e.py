@@ -98,6 +98,9 @@ class Flow:
         self.metrics: dict[str, object] = {}
         self.aborted = False
         self._responses: list = []
+        # per-step asyncio timeouts are the real limit; SwiftShader long tasks can block >30s
+        page.set_default_timeout(300_000 * scale)
+        page.set_default_navigation_timeout(300_000 * scale)
         page.on("console", self._on_console)
         page.on("pageerror", lambda e: self.console_errs.append(f"pageerror: {e}\n{getattr(e, 'stack', '') or ''}"))
         page.on("response", lambda r: self._responses.append(r))
