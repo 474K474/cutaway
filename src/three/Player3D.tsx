@@ -54,8 +54,12 @@ const LIFT = -0.075;
 const RPM = { 33: (33.33 / 60) * Math.PI * 2, 45: (45 / 60) * Math.PI * 2 } as const;
 
 // ---------- Тайминги (с) ----------
-const IN = { land: 1.3, liftAt: 1.35, liftDur: 0.3, swingAt: 1.65, swingDur: 1.0, lowerAt: 2.65, lowerDur: 0.35, spinAt: 2.95 };
-const OUT = { liftDur: 0.25, swingAt: 0.25, swingDur: 0.85, lowerAt: 1.1, lowerDur: 0.25, recAt: 1.45, recDur: 1.3 };
+// Установка: перенос над корпусом (carry) → вертикальное опускание на шпиндель (drop) → тонарм.
+const IN = { carry: 0.9, drop: 0.55, land: 1.45, liftAt: 1.5, liftDur: 0.3, swingAt: 1.8, swingDur: 1.0, lowerAt: 2.8, lowerDur: 0.35, spinAt: 3.1 };
+// Высота переноса: заметно выше тонарма и блока противовеса (их верх ≈ 0.06 м).
+const CARRY_Y = 0.115;
+// Снятие: тонарм на подставку → пластинку поднимают вертикально (rise) → уносят влево, прочь от тонарма (away).
+const OUT = { liftDur: 0.25, swingAt: 0.25, swingDur: 0.85, lowerAt: 1.1, lowerDur: 0.25, recAt: 1.45, rise: 0.45, away: 0.9 };
 
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const smooth = (x: number) => { const t = clamp01(x); return t * t * (3 - 2 * t); };
@@ -590,11 +594,15 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
     let motor = runningRef.current;
 
     if (leaveAt.current === null) {
-      const p = easeOut(t / IN.land);
-      rx = lerp(0.36, 0, p);
-      rz = lerp(-0.22, 0, p);
-      ry = REC_Y + 0.13 * Math.pow(1 - p, 1.6);
-      tilt = lerp(-0.4, 0, p);
+      // Пластинку приносят слева, высоко над корпусом, почти ровно…
+      const c = smooth(t / IN.carry);
+      const cOut = easeOut(t / IN.carry);
+      rx = lerp(-0.5, 0, cOut);
+      rz = lerp(-0.08, 0, c);
+      // …и над шпинделем опускают строго вертикально, мягко притормаживая у мата.
+      const d = smooth((t - IN.carry) / IN.drop);
+      ry = lerp(CARRY_Y + 0.03 * (1 - c), REC_Y, d);
+      tilt = 0.12 * (1 - c);
       const lift = smooth((t - IN.liftAt) / IN.liftDur);
       const swing = smooth((t - IN.swingAt) / IN.swingDur);
       const lower = smooth((t - IN.lowerAt) / IN.lowerDur);
@@ -615,11 +623,14 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
       pitch = LIFT * (lift - lower);
       cueA = lift - lower;
       motor = false;
-      const q = easeIn((u - OUT.recAt) / OUT.recDur);
-      ry = REC_Y + 0.2 * q + 0.03 * smooth((u - OUT.recAt) / 0.3);
-      rx = lerp(0, 0.3, q);
-      rz = lerp(0, -0.45, q);
-      tilt = lerp(0, 0.35, q);
+      // Сначала строго вверх, над тонармом…
+      const up = smooth((u - OUT.recAt) / OUT.rise);
+      // …затем влево, за край кадра, с лёгким наклоном «в руке».
+      const aw = easeIn((u - OUT.recAt - OUT.rise) / OUT.away);
+      ry = lerp(REC_Y, CARRY_Y, up) + 0.04 * aw;
+      rx = lerp(0, -0.55, aw);
+      rz = lerp(0, -0.06, aw);
+      tilt = 0.12 * aw;
     }
 
     // Разгон и выбег диска с инерцией тяжёлого платтера.
@@ -630,7 +641,7 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
 
     if (record.current) {
       record.current.position.set(rx, ry, rz);
-      record.current.rotation.set(tilt, 0, tilt * 0.3);
+      record.current.rotation.set(tilt * 0.4, 0, tilt);
     }
     if (armYaw.current) armYaw.current.rotation.y = yaw;
     if (armPitch.current) armPitch.current.rotation.x = pitch;
