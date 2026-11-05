@@ -15,7 +15,6 @@
     "url": "git+https://github.com/474K474/cutaway.git"
   },
   "dependencies": {
-    "@pmndrs/assets": "^1.7.0",
     "@react-three/fiber": "^9.8.2",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

@@ -68,7 +68,7 @@
 
 .warm-grade { position: absolute; inset: 0; z-index: 4; pointer-events: none; background: radial-gradient(ellipse 55% 50% at 50% 40%, rgba(255, 150, 70, .12), transparent 70%); mix-blend-mode: screen; }
 .vignette { position: absolute; inset: 0; z-index: 4; pointer-events: none; background: radial-gradient(ellipse 75% 70% at 50% 45%, transparent 45%, rgba(18, 7, 0, .6) 100%); }
-.film-grain { z-index: 10; opacity: .05; }
+
 .stage-hint { position: absolute; left: 0; right: 0; bottom: 24px; z-index: 11; text-align: center; font-size: 13px; color: #8f877b; letter-spacing: .04em; pointer-events: none; }
 
 /* ---------- Ящик (CSS 3D) ---------- */

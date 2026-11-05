@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { projects, trackCode } from '../data/projects';
 import { drawCover } from '../three/drawCover';
+import { rng, waitFonts } from '../util/canvas';
 
 // Лёгкие ассеты для мобильной версии: всё рисуется на canvas, three.js не грузится.
 
@@ -9,26 +10,23 @@ export function useCoverImages() {
   const [urls, setUrls] = useState<string[] | null>(null);
   useEffect(() => {
     let alive = true;
-    const make = () => {
-      if (!alive) return;
-      setUrls(projects.map((p, i) => drawCover(p, trackCode(projects, i), 720).toDataURL('image/jpeg', 0.86)));
+    const made: string[] = [];
+    // Blob + objectURL вместо синхронного toDataURL: кодирование JPEG идёт вне основного потока.
+    waitFonts().then(async () => {
+      for (let i = 0; i < projects.length; i++) {
+        if (!alive) return;
+        const cv = drawCover(projects[i], trackCode(projects, i), 720);
+        const blob = await new Promise<Blob | null>((r) => cv.toBlob(r, 'image/jpeg', 0.86));
+        made.push(blob ? URL.createObjectURL(blob) : cv.toDataURL('image/jpeg', 0.86));
+      }
+      if (alive) setUrls(made);
+    });
+    return () => {
+      alive = false;
+      made.forEach((u) => u.startsWith('blob:') && URL.revokeObjectURL(u));
     };
-    const fonts = document.fonts
-      ? Promise.all([document.fonts.load('700 100px Oswald'), document.fonts.load('700 40px Onest'), document.fonts.load('800 40px Onest')])
-      : Promise.resolve();
-    const t = window.setTimeout(make, 2500);
-    fonts.then(() => { window.clearTimeout(t); make(); }, make);
-    return () => { alive = false; window.clearTimeout(t); };
   }, []);
   return urls;
-}
-
-function rng(seed: number) {
-  let s = seed >>> 0 || 1;
-  return () => {
-    s ^= s << 13; s ^= s >>> 17; s ^= s << 5;
-    return ((s >>> 0) % 100000) / 100000;
-  };
 }
 
 /** Доски ящика с волокном — та же эстетика, что у 3D-ящика на десктопе. */

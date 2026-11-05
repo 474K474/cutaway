@@ -1,4 +1,4 @@
-import { Suspense, lazy, useRef, useState } from 'react';
+import { Fragment, Suspense, lazy, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { Project } from '../data/projects';
 import { Cover } from './Cover';
@@ -17,6 +17,10 @@ interface Props {
   onBack: () => void;
   onPrev: () => void;
   onNext: () => void;
+  /** Номер сеанса: при смене все анимации проигрываются заново. */
+  session: number;
+  /** Экран проигрывателя виден. */
+  active: boolean;
 }
 
 type Side = 'a' | 'b' | 'c';
@@ -36,11 +40,18 @@ function currentAngle(el: HTMLElement | null): number {
 }
 
 /** Проигрыватель: половина пластинки слева, справа карточка проекта. Ремоунт по key = новая анимация. */
-export function Player({ project: p, code, nextTitle, leaving, onBack, onPrev, onNext }: Props) {
+export function Player({ project: p, code, nextTitle, leaving, onBack, onPrev, onNext, session, active }: Props) {
   const [side, setSide] = useState<Side>('a');
   const [stopAngle, setStopAngle] = useState(0);
   const [motor, setMotor] = useState(!use3D);
   const spinRef = useRef<HTMLDivElement>(null);
+
+  // Новая пластинка — всё с начала.
+  useEffect(() => {
+    setSide('a');
+    setStopAngle(0);
+    setMotor(!use3D);
+  }, [session]);
 
   const back = () => {
     if (leaving) return;
@@ -56,10 +67,10 @@ export function Player({ project: p, code, nextTitle, leaving, onBack, onPrev, o
       <div className={use3D ? 'deck deck-3d' : 'deck'}>
         {use3D ? (
           <Suspense fallback={null}>
-            <Player3D project={p} code={code} leaving={leaving} onMotor={setMotor} />
+            <Player3D project={p} code={code} leaving={leaving} onMotor={setMotor} session={session} active={active} />
           </Suspense>
         ) : (
-          <>
+          <Fragment key={session}>
         <div className="deck-inner">
           <div className="platter" aria-hidden="true" />
           <div className="platter-strobe" aria-hidden="true" />
@@ -110,12 +121,12 @@ export function Player({ project: p, code, nextTitle, leaving, onBack, onPrev, o
           </div>
         </div>
         <div className="deck-wood" aria-hidden="true" />
-          </>
+          </Fragment>
         )}
       </div>
       <div className="panel-wrap">
         <div className="panel-glow" aria-hidden="true" style={{ background: `radial-gradient(ellipse at center, ${p.cover.bg}, transparent 65%)` }} />
-        <div className={L ? 'panel panel-out' : 'panel'}>
+        <div key={session} className={L ? 'panel panel-out' : 'panel'}>
           <div className="panel-top">
             <button className="btn" onClick={back}><ArrowLeft />Обратно в ящик</button>
             <span className="now-playing">

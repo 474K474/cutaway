@@ -224,7 +224,7 @@ export function CrateScene({ hovered, pulling, returning, light, onHover, onPick
       <div className="warm-grade light-layer" aria-hidden="true" />
       <div className="vignette" aria-hidden="true" />
       <div className="room-dark" aria-hidden="true" />
-      <svg className="fill-svg film-grain" aria-hidden="true"><rect width="100%" height="100%" filter="url(#filmgrain)" /></svg>
+      <div className="film-grain" aria-hidden="true" />
       <div className="stage-hint">Веди курсором вдоль ящика · клик — достать пластинку</div>
     </div>
   );

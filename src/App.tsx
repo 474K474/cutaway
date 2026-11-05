@@ -27,17 +27,28 @@ export default function App() {
   const [leaving, setLeaving] = useState(false);
   const [playKey, setPlayKey] = useState(0);
   const [exiting, setExiting] = useState(false);
+  // Экран проигрывателя монтируется один раз (заранее, в простое) и дальше только показывается/прячется.
+  const [playerMounted, setPlayerMounted] = useState(false);
   const light = useLightFlicker();
 
   const timers = useRef<number[]>([]);
   const later = useCallback((fn: () => void, ms: number) => {
-    timers.current.push(window.setTimeout(fn, ms));
+    const id = window.setTimeout(() => {
+      timers.current = timers.current.filter((t) => t !== id);
+      fn();
+    }, ms);
+    timers.current.push(id);
   }, []);
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
-  // Заранее подгружаем 3D-проигрыватель, чтобы он появлялся без паузы.
+  // Заранее, когда браузер свободен, собираем сцену проигрывателя и компилируем её шейдеры —
+  // чтобы пластинка вставала без паузы.
   useEffect(() => {
     if (!use3D) return;
-    const id = window.setTimeout(() => { import('./three/Player3D'); }, 3000);
+    const idle = (cb: () => void) => {
+      if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(cb, { timeout: 4000 });
+      else setTimeout(cb, 200);
+    };
+    const id = window.setTimeout(() => idle(() => setPlayerMounted(true)), 3500);
     return () => window.clearTimeout(id);
   }, []);
 
@@ -60,6 +71,7 @@ export default function App() {
       setPulling(false);
       setHovered(-1);
       setPlayKey((k) => k + 1);
+      setPlayerMounted(true);
       setView('player');
       window.scrollTo({ top: 0 });
     }, PULL_MS);
@@ -85,24 +97,28 @@ export default function App() {
     setPlayKey((k) => k + 1);
   };
 
+  const fx = exiting ? ' view-in view-out' : ' view-in';
+  const crateShown = view === 'crate';
+  const playerShown = view === 'player';
+
   return (
     <>
       <SvgDefs />
-      {view === 'crate' ? (
-        <main className={`crate-layout view-in${exiting ? ' view-out' : ''}`}>
-          {use3D ? (
-            <Suspense fallback={<div className="stage" />}>
-              <CrateScene3D hovered={hovered} pulling={pulling} returning={returning} light={light} onHover={hover} onPick={play} />
-            </Suspense>
-          ) : (
-            <CrateScene hovered={hovered} pulling={pulling} returning={returning} light={light} onHover={hover} onPick={play} />
-          )}
-          <CratePanel index={index} onHover={hover} onPlay={play} />
-        </main>
-      ) : (
-        <main className={`view-in${exiting ? ' view-out' : ''}`}>
+      <main className={`crate-layout${crateShown ? fx : ' view-hidden'}`} inert={!crateShown} aria-hidden={!crateShown}>
+        {use3D ? (
+          <Suspense fallback={<div className="stage" />}>
+            <CrateScene3D active={crateShown} hovered={hovered} pulling={pulling} returning={returning} light={light} onHover={hover} onPick={play} />
+          </Suspense>
+        ) : (
+          <CrateScene hovered={hovered} pulling={pulling} returning={returning} light={light} onHover={hover} onPick={play} />
+        )}
+        <CratePanel index={index} onHover={hover} onPlay={play} />
+      </main>
+      {(playerMounted || playerShown) && (
+        <main className={playerShown ? fx.trim() : 'view-hidden'} inert={!playerShown} aria-hidden={!playerShown}>
           <Player
-            key={playKey}
+            session={playKey}
+            active={playerShown}
             project={projects[index]}
             code={trackCode(projects, index)}
             nextTitle={projects[wrap(index + 1)].title}

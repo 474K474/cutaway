@@ -6,15 +6,10 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
-// CC0-ассеты (Poly Haven через @pmndrs/assets): HDRI-окружение и карты нормалей.
-import hdri from '@pmndrs/assets/hdri/apartment.exr';
-import nBrushed from '@pmndrs/assets/normals/0004.webp';
-import nPowder from '@pmndrs/assets/normals/0021.webp';
-import nRubber from '@pmndrs/assets/normals/0018.webp';
-import nWood from '@pmndrs/assets/normals/0019.webp';
 import type { Project } from '../data/projects';
-import { drawCover } from './drawCover';
+import { coverCanvas } from './coverCache';
 import { decalTexture, plankTexture, plasterTexture, rng, toTexture, vinylRoughness, vinylTexture } from './textures';
+import { addGrain, makeCanvas } from '../util/canvas';
 
 interface Props {
   project: Project;
@@ -22,6 +17,13 @@ interface Props {
   leaving: boolean;
   /** Сообщает наружу, крутится ли диск (для эквалайзера в карточке). */
   onMotor?: (running: boolean) => void;
+}
+
+interface StageProps extends Props {
+  /** Номер «сеанса»: при смене пластинка заново ставится на проигрыватель. */
+  session: number;
+  /** Проигрыватель на экране. Пока скрыт — сцена не рисуется, но уже собрана и скомпилирована. */
+  active: boolean;
 }
 
 // ---------- Геометрия (метры) ----------
@@ -58,23 +60,14 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 // ---------- Текстуры ----------
 
-function canvas(w: number, h: number) {
-  const cv = document.createElement('canvas');
-  cv.width = w; cv.height = h;
-  return { cv, ctx: cv.getContext('2d')! };
-}
+const canvas = makeCanvas;
 
 /** Матовая чёрная панель: мелкая неровность порошковой краски, без полос. */
 function matteBlack() {
   const { cv, ctx } = canvas(512, 512);
   ctx.fillStyle = '#191817';
   ctx.fillRect(0, 0, 512, 512);
-  const r = rng(31);
-  for (let i = 0; i < 22000; i++) {
-    const v = Math.floor(14 + r() * 22);
-    ctx.fillStyle = `rgb(${v},${v - 1},${v - 2})`;
-    ctx.fillRect(r() * 512, r() * 512, 1, 1);
-  }
+  addGrain(ctx, 512, 0.1);
   const t = toTexture(cv);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(3, 3);
@@ -83,14 +76,14 @@ function matteBlack() {
 
 /** Стробоскопические точки на боковине платтера (три ряда — 50/60 Гц и 45 об/мин). */
 function strobeTexture() {
-  const { cv, ctx } = canvas(4096, 96);
+  const { cv, ctx } = canvas(2048, 96);
   const g = ctx.createLinearGradient(0, 0, 0, 96);
   g.addColorStop(0, '#9a9a9a'); g.addColorStop(0.5, '#c4c4c4'); g.addColorStop(1, '#8a8a8a');
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 4096, 96);
+  ctx.fillRect(0, 0, 2048, 96);
   const rows: [number, number, number][] = [[14, 30, 180], [40, 56, 183], [66, 82, 177]];
   for (const [y0, y1, n] of rows) {
-    const step = 4096 / n;
+    const step = 2048 / n;
     for (let k = 0; k < n; k++) {
       ctx.fillStyle = '#ececec';
       ctx.fillRect(k * step, y0, step * 0.5, y1 - y0);
@@ -129,7 +122,7 @@ function knurl() {
  * Именно это даёт настоящей пластинке «крест» из блика, который стоит на месте, пока диск крутится.
  */
 function vinylAniso() {
-  const S = 1024, C = S / 2;
+  const S = 512, C = S / 2;
   const { cv, ctx } = canvas(S, S);
   const img = ctx.createImageData(S, S);
   const d = img.data;
@@ -153,8 +146,8 @@ function vinylAniso() {
  * Карта шероховатости «с жизнью»: отпечатки пальцев, разводы, пыль и микроцарапины.
  * Без неё любая поверхность выглядит как идеальный пластик.
  */
-function grime(seed: number, base: number, opts: { prints?: number; scratches?: number; dust?: number; smudge?: number } = {}) {
-  const S = 1024;
+function grime(seed: number, base: number, opts: { prints?: number; scratches?: number; dust?: number; smudge?: number } = {}, S = 1024) {
+  const k = S / 1024;
   const { cv, ctx } = canvas(S, S);
   const r = rng(seed);
   const g = Math.round(base * 255);
@@ -162,7 +155,7 @@ function grime(seed: number, base: number, opts: { prints?: number; scratches?: 
   ctx.fillRect(0, 0, S, S);
   // Крупные разводы — неравномерная протирка
   for (let i = 0; i < (opts.smudge ?? 26); i++) {
-    const x = r() * S, y = r() * S, rad = 60 + r() * 220;
+    const x = r() * S, y = r() * S, rad = (60 + r() * 220) * k;
     const gr = ctx.createRadialGradient(x, y, 0, x, y, rad);
     const v = r() < 0.5 ? 0 : 255;
     gr.addColorStop(0, `rgba(${v},${v},${v},${0.05 + r() * 0.07})`);
@@ -172,11 +165,11 @@ function grime(seed: number, base: number, opts: { prints?: number; scratches?: 
   }
   // Отпечатки пальцев — завитки чуть более гладкие (жир)
   for (let i = 0; i < (opts.prints ?? 5); i++) {
-    const x = r() * S, y = r() * S, w = 26 + r() * 14, rot = r() * Math.PI;
+    const x = r() * S, y = r() * S, w = (26 + r() * 14) * k, rot = r() * Math.PI;
     ctx.save();
     ctx.translate(x, y); ctx.rotate(rot);
     ctx.strokeStyle = 'rgba(0,0,0,.16)';
-    ctx.lineWidth = 1.3;
+    ctx.lineWidth = 1.3 * Math.max(0.5, k);
     for (let k = 2; k < 15; k++) {
       ctx.beginPath();
       ctx.ellipse(0, 0, w * (k / 15), w * 1.35 * (k / 15), 0, 0, Math.PI * 2);
@@ -186,16 +179,16 @@ function grime(seed: number, base: number, opts: { prints?: number; scratches?: 
   }
   // Микроцарапины — светлее (шероховатее)
   for (let i = 0; i < (opts.scratches ?? 260); i++) {
-    const x = r() * S, y = r() * S, len = 8 + r() * 70, a = r() * Math.PI;
+    const x = r() * S, y = r() * S, len = (8 + r() * 70) * k, a = r() * Math.PI;
     ctx.strokeStyle = `rgba(255,255,255,${0.08 + r() * 0.18})`;
-    ctx.lineWidth = 0.6 + r() * 0.7;
+    ctx.lineWidth = (0.6 + r() * 0.7) * Math.max(0.5, k);
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len);
     ctx.stroke();
   }
   // Пыль
-  for (let i = 0; i < (opts.dust ?? 900); i++) {
+  for (let i = 0; i < Math.round((opts.dust ?? 900) * k * k); i++) {
     ctx.fillStyle = `rgba(255,255,255,${0.15 + r() * 0.35})`;
     ctx.fillRect(r() * S, r() * S, 1 + r() * 1.5, 1 + r() * 1.5);
   }
@@ -241,13 +234,150 @@ function chamferRing(R: number, h: number) {
   return new THREE.LatheGeometry(pts, 160);
 }
 
+// ---------- Общие ресурсы: создаются один раз на сессию ----------
+
+// CC0-ассеты Poly Haven (взяты из набора pmndrs/assets) лежат отдельными файлами в public/ —
+// грузятся параллельно и не раздувают JS.
+const BASE = import.meta.env.BASE_URL;
+const HDRI_URL = `${BASE}env/apartment.exr`;
+
+const engraveCache = new Map<string, THREE.Texture>();
+function engraveTex(text: string) {
+  let t = engraveCache.get(text);
+  if (!t) {
+    t = decalTexture([text], { w: 512, h: 96, font: '600 60px Onest, sans-serif', color: 'rgba(214,206,192,.7)', spacing: 8 });
+    engraveCache.set(text, t);
+  }
+  return t;
+}
+
+const buttonCache = new Map<string, { geo: THREE.BufferGeometry; grime: THREE.Texture }>();
+function buttonRes(size: [number, number, number]) {
+  const key = size.join(',');
+  let r = buttonCache.get(key);
+  if (!r) {
+    r = {
+      geo: new RoundedBoxGeometry(size[0], size[1], size[2], 3, Math.min(size[0], size[1], size[2]) * 0.3),
+      grime: grime(Math.round(size[0] * 1000), 0.42, { prints: 1, scratches: 30, smudge: 6 }, 256),
+    };
+    buttonCache.set(key, r);
+  }
+  return r;
+}
+
+function buildKit() {
+  const loadNormal = (name: string, rx: number, ry: number) => {
+    const t = new THREE.TextureLoader().load(`${BASE}normals/${name}.webp`);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(rx, ry);
+    t.anisotropy = 8;
+    return t;
+  };
+  const brushed = loadNormal('0004', 6, 1.5);
+  const brushedFine = brushed.clone();
+  brushedFine.repeat.set(3, 0.4);
+  const normals = {
+    brushed,
+    brushedFine,
+    powder: loadNormal('0021', 7, 7),
+    rubber: loadNormal('0018', 10, 10),
+    wood: loadNormal('0019', 1, 4),
+  };
+  const plate = grime(11, 0.6, { prints: 7, scratches: 320, dust: 1400 }, 1024);
+  plate.repeat.set(1.4, 1.1);
+  const grimes = {
+    plate,
+    vinyl: grime(23, 0.22, { prints: 3, scratches: 420, dust: 400, smudge: 18 }, 512),
+    metal: grime(37, 0.34, { prints: 2, scratches: 500, dust: 300 }, 512),
+    plastic: grime(41, 0.46, { prints: 2, scratches: 120 }, 512),
+  };
+  const strobe = strobeTexture();
+  const mat = rubberMat();
+  const geo = {
+    body: new RoundedBoxGeometry(BODY_W, BODY.h, BODY_D, 4, 0.006),
+    plate: new RoundedBoxGeometry(BODY_W - 0.004, 0.004, BODY_D - 0.004, 2, 0.0018),
+    headshell: new RoundedBoxGeometry(0.019, 0.0045, 0.036, 2, 0.0018),
+    cart: new RoundedBoxGeometry(0.014, 0.01, 0.019, 2, 0.0016),
+    pivotBlock: new RoundedBoxGeometry(0.026, 0.024, 0.026, 3, 0.004),
+    fader: new RoundedBoxGeometry(0.022, 0.011, 0.014, 2, 0.003),
+    cueBox: new RoundedBoxGeometry(0.014, 0.012, 0.028, 2, 0.003),
+    hinge: new RoundedBoxGeometry(0.04, 0.012, 0.016, 2, 0.003),
+    chamfer: chamferRing(PLATTER_R, 0.004),
+  };
+  // Материалы: шлифованный алюминий с анизотропным бликом, матовая порошковая краска, резина.
+  const rubber = new THREE.MeshStandardMaterial({ color: '#0d0d0d', roughness: 0.92, normalMap: normals.rubber, normalScale: new THREE.Vector2(0.3, 0.3) });
+  const ccMask = (() => {
+    const { cv, ctx } = canvas(256, 256);
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 256, 256);
+    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(128, 128, 128 * 0.345, 0, Math.PI * 2); ctx.fill();
+    return toTexture(cv, { srgb: false });
+  })();
+  return {
+    walnut: plankTexture(4),
+    black: matteBlack(),
+    knurlTex: knurl(),
+    vRough: vinylRoughness(),
+    aniso: vinylAniso(),
+    ccMask,
+    grimes,
+    geo,
+    normals,
+    alu: new THREE.MeshPhysicalMaterial({ color: '#a3a29f', metalness: 1, roughness: 1, roughnessMap: grimes.metal, anisotropy: 0.75, normalMap: normals.brushedFine, normalScale: new THREE.Vector2(0.12, 0.12) }),
+    // Трубка тонарма: шлифовка вдоль длины, поэтому анизотропия повёрнута на 90°.
+    armTube: new THREE.MeshPhysicalMaterial({ color: '#b2b1ae', metalness: 1, roughness: 1, roughnessMap: grimes.metal, anisotropy: 0.9, anisotropyRotation: Math.PI / 2 }),
+    aluPolished: new THREE.MeshPhysicalMaterial({ color: '#d6d5d2', metalness: 1, roughness: 0.14 }),
+    aluDark: new THREE.MeshPhysicalMaterial({ color: '#7a7977', metalness: 1, roughness: 1, roughnessMap: grimes.metal, anisotropy: 0.5, normalMap: normals.brushedFine, normalScale: new THREE.Vector2(0.1, 0.1) }),
+    blackMetal: new THREE.MeshPhysicalMaterial({ color: '#1d1c1b', metalness: 0.6, roughness: 1, roughnessMap: grimes.plastic, normalMap: normals.powder, normalScale: new THREE.Vector2(0.3, 0.3), clearcoat: 0.15, clearcoatRoughness: 0.5 }),
+    plastic: new THREE.MeshPhysicalMaterial({ color: '#161514', metalness: 0, roughness: 1, roughnessMap: grimes.plastic, clearcoat: 0.3, clearcoatRoughness: 0.45 }),
+    rubber,
+    platterMats: [
+      new THREE.MeshStandardMaterial({ map: strobe, metalness: 0.9, roughness: 0.32 }),
+      new THREE.MeshPhysicalMaterial({ color: '#7c7c7a', metalness: 1, roughness: 0.42, anisotropy: 0.7, normalMap: normals.brushed, normalScale: new THREE.Vector2(0.1, 0.1) }),
+      new THREE.MeshStandardMaterial({ color: '#777', metalness: 1, roughness: 0.5 }),
+    ],
+    matMats: [rubber, new THREE.MeshStandardMaterial({ map: mat, roughness: 0.9, normalMap: normals.rubber, normalScale: new THREE.Vector2(0.35, 0.35) }), rubber],
+    recordEdge: new THREE.MeshStandardMaterial({ color: '#0e0e0e', roughness: 0.32 }),
+    table: (() => {
+      const t = plankTexture(1);
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.repeat.set(1.4, 6);
+      t.rotation = Math.PI / 2;
+      return t;
+    })(),
+    wall: plasterTexture(),
+  };
+}
+
+let kitInstance: ReturnType<typeof buildKit> | null = null;
+/** Все текстуры, геометрия и материалы проигрывателя — один экземпляр на всю сессию. */
+export function getKit() {
+  return (kitInstance ??= buildKit());
+}
+
+const recordCache = new Map<string, THREE.Material[]>();
+/** Материал пластинки для проекта: обложка на этикетке, пыль, анизотропия. Кэшируется. */
+function recordMaterials(project: Project, code: string) {
+  let mats = recordCache.get(project.id);
+  if (!mats) {
+    const kit = getKit();
+    const vinyl = dustOnVinyl(vinylTexture(coverCanvas(project, code, 1024), undefined, 1024), 7);
+    const face = new THREE.MeshPhysicalMaterial({
+      map: vinyl, roughnessMap: kit.vRough, roughness: 0.85,
+      // Анизотропный блик по бороздкам + тонкий «лак» со следами пальцев и пылью
+      anisotropy: 0.92, anisotropyMap: kit.aniso,
+      clearcoat: 0.4, clearcoatMap: kit.ccMask,
+      clearcoatRoughness: 1, clearcoatRoughnessMap: kit.grimes.vinyl,
+    });
+    mats = [kit.recordEdge, face, face];
+    recordCache.set(project.id, mats);
+  }
+  return mats;
+}
+
 // ---------- Мелкие детали ----------
 
 function Engrave({ text, x, z, w, rot = 0 }: { text: string; x: number; z: number; w: number; rot?: number }) {
-  const tex = useMemo(
-    () => decalTexture([text], { w: 512, h: 96, font: '600 60px Onest, sans-serif', color: 'rgba(214,206,192,.7)', spacing: 8 }),
-    [text],
-  );
+  const tex = engraveTex(text);
   return (
     <mesh position={[x, 0.0004, z]} rotation={[-Math.PI / 2, 0, rot]}>
       <planeGeometry args={[w, w * (96 / 512)]} />
@@ -262,8 +392,7 @@ function PushButton({ position, size, color = '#2a2725', active = false, label, 
 }) {
   const cap = useRef<THREE.Mesh>(null);
   const press = useRef(0);
-  const capGeo = useMemo(() => new RoundedBoxGeometry(size[0], size[1], size[2], 3, Math.min(size[0], size[1], size[2]) * 0.3), [size]);
-  const grimeMap = useMemo(() => grime(size[0] * 1000, 0.42, { prints: 1, scratches: 30, smudge: 6 }), [size]);
+  const { geo: capGeo, grime: grimeMap } = buttonRes(size);
   useFrame((_, dt) => {
     press.current = Math.max(0, press.current - dt * 6);
     if (cap.current) cap.current.position.y = size[1] / 2 + 0.001 - press.current * 0.0035 - (active ? 0.0008 : 0);
@@ -298,6 +427,19 @@ function PushButton({ position, size, color = '#2a2725', active = false, label, 
 
 RectAreaLightUniformsLib.init();
 
+let hdriPromise: Promise<THREE.Texture | null> | null = null;
+let hdriTex: THREE.Texture | null = null;
+/** HDRI-окружение: начинаем грузить сразу при импорте модуля, используем один экземпляр на сессию. */
+function loadHdri() {
+  return (hdriPromise ??= new Promise((resolve) => {
+    new EXRLoader().load(HDRI_URL, (tex) => {
+      tex.mapping = THREE.EquirectangularReflectionMapping;
+      resolve((hdriTex = tex));
+    }, undefined, () => resolve(null));
+  }));
+}
+loadHdri();
+
 /** Большой мягкий «софтбокс» — широкие плавные блики на виниле и металле, как на предметной съёмке. */
 function Softbox() {
   const ref = useRef<THREE.RectAreaLight>(null);
@@ -309,22 +451,30 @@ function Lights() {
   const key = useRef<THREE.SpotLight>(null);
   const { scene, gl } = useThree();
   useEffect(() => {
-    // Сначала процедурная комната, затем настоящее HDRI-окружение — от него честные отражения в металле и виниле.
-    const pmrem = new THREE.PMREMGenerator(gl);
-    const room = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    scene.environment = room;
-    scene.environmentIntensity = 0.3;
-    let hdr: THREE.Texture | null = null;
+    // HDRI-окружение даёт честные отражения в металле и виниле. Оно грузится заранее (при импорте модуля),
+    // поэтому окружение задаётся один раз и шейдеры не перекомпилируются посреди анимации.
     let alive = true;
-    new EXRLoader().load(hdri, (tex) => {
-      if (!alive) { tex.dispose(); return; }
-      tex.mapping = THREE.EquirectangularReflectionMapping;
-      hdr = tex;
-      scene.environment = tex;
-      scene.environmentIntensity = 0.24;
-      scene.environmentRotation.set(0, 1.2, 0);
-    });
-    return () => { alive = false; room.dispose(); hdr?.dispose(); pmrem.dispose(); };
+    let fallback: THREE.Texture | null = null;
+    const apply = (tex: THREE.Texture | null) => {
+      if (!alive) return;
+      if (tex) {
+        scene.environment = tex;
+        scene.environmentIntensity = 0.24;
+        scene.environmentRotation.set(0, 1.2, 0);
+      } else {
+        // EXR не загрузился — процедурная комната.
+        const pmrem = new THREE.PMREMGenerator(gl);
+        const room = new RoomEnvironment();
+        fallback = pmrem.fromScene(room, 0.04).texture;
+        room.dispose();
+        pmrem.dispose();
+        scene.environment = fallback;
+        scene.environmentIntensity = 0.3;
+      }
+    };
+    if (hdriTex) apply(hdriTex);
+    else loadHdri().then(apply);
+    return () => { alive = false; fallback?.dispose(); };
   }, [gl, scene]);
   useEffect(() => {
     if (!key.current) return;
@@ -342,7 +492,7 @@ function Lights() {
         intensity={5.5}
         color="#ffe0c2"
         castShadow
-        shadow-mapSize={[2048, 2048]}
+        shadow-mapSize={[1024, 1024]}
         shadow-bias={-0.0003}
         shadow-normalBias={0.008}
         shadow-radius={6}
@@ -356,14 +506,7 @@ function Lights() {
 }
 
 function Room() {
-  const table = useMemo(() => {
-    const t = plankTexture(1);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.repeat.set(1.4, 6);
-    t.rotation = Math.PI / 2;
-    return t;
-  }, []);
-  const wall = useMemo(() => plasterTexture(), []);
+  const { table, wall } = getKit();
   return (
     <group>
       {/* Тумба, на которой стоит проигрыватель */}
@@ -382,84 +525,11 @@ function Room() {
 // ---------- Проигрыватель ----------
 
 function Turntable({ project, code, leaving, onMotor }: Props) {
-  const walnut = useMemo(() => plankTexture(4), []);
-  const black = useMemo(() => matteBlack(), []);
-  const strobe = useMemo(() => strobeTexture(), []);
-  const mat = useMemo(() => rubberMat(), []);
-  const knurlTex = useMemo(() => knurl(), []);
-  const cover = useMemo(() => drawCover(project, code, 1024), [project, code]);
-  const vinyl = useMemo(() => vinylTexture(cover, undefined, 2048), [cover]);
-  const vRough = useMemo(() => vinylRoughness(), []);
-  const aniso = useMemo(() => vinylAniso(), []);
-  const grimes = useMemo(() => {
-    const plate = grime(11, 0.6, { prints: 7, scratches: 320, dust: 1400 });
-    plate.repeat.set(1.4, 1.1);
-    return {
-      plate,
-      vinyl: grime(23, 0.22, { prints: 3, scratches: 420, dust: 400, smudge: 18 }),
-      metal: grime(37, 0.34, { prints: 2, scratches: 500, dust: 300 }),
-      plastic: grime(41, 0.46, { prints: 2, scratches: 120 }),
-    };
-  }, []);
-  useMemo(() => dustOnVinyl(vinyl, 7), [vinyl]);
-  const geo = useMemo(() => ({
-    body: new RoundedBoxGeometry(BODY_W, BODY.h, BODY_D, 4, 0.006),
-    plate: new RoundedBoxGeometry(BODY_W - 0.004, 0.004, BODY_D - 0.004, 2, 0.0018),
-    headshell: new RoundedBoxGeometry(0.019, 0.0045, 0.036, 2, 0.0018),
-    cart: new RoundedBoxGeometry(0.014, 0.01, 0.019, 2, 0.0016),
-    pivotBlock: new RoundedBoxGeometry(0.026, 0.024, 0.026, 3, 0.004),
-    fader: new RoundedBoxGeometry(0.022, 0.011, 0.014, 2, 0.003),
-    cueBox: new RoundedBoxGeometry(0.014, 0.012, 0.028, 2, 0.003),
-    hinge: new RoundedBoxGeometry(0.04, 0.012, 0.016, 2, 0.003),
-    chamfer: chamferRing(PLATTER_R, 0.004),
-  }), []);
-
-  const normals = useMemo(() => {
-    const load = (url: string, rx: number, ry: number) => {
-      const t = new THREE.TextureLoader().load(url);
-      t.wrapS = t.wrapT = THREE.RepeatWrapping;
-      t.repeat.set(rx, ry);
-      t.anisotropy = 16;
-      return t;
-    };
-    return {
-      brushed: load(nBrushed, 6, 1.5),
-      brushedFine: load(nBrushed, 3, 0.4),
-      powder: load(nPowder, 7, 7),
-      rubber: load(nRubber, 10, 10),
-      wood: load(nWood, 1, 4),
-    };
-  }, []);
-
-  // Материалы: сатинированный (шлифованный) алюминий с анизотропным бликом, матовая порошковая краска, резина.
-
-  const alu = useMemo(() => new THREE.MeshPhysicalMaterial({ color: '#a3a29f', metalness: 1, roughness: 1, roughnessMap: grimes.metal, anisotropy: 0.75, normalMap: normals.brushedFine, normalScale: new THREE.Vector2(0.12, 0.12) }), [normals, grimes]);
-  // Трубка тонарма: шлифовка вдоль длины, поэтому анизотропия повёрнута на 90°.
-  const armTube = useMemo(() => new THREE.MeshPhysicalMaterial({ color: '#b2b1ae', metalness: 1, roughness: 1, roughnessMap: grimes.metal, anisotropy: 0.9, anisotropyRotation: Math.PI / 2 }), [grimes]);
-  const aluPolished = useMemo(() => new THREE.MeshPhysicalMaterial({ color: '#d6d5d2', metalness: 1, roughness: 0.14 }), []);
-  const aluDark = useMemo(() => new THREE.MeshPhysicalMaterial({ color: '#7a7977', metalness: 1, roughness: 1, roughnessMap: grimes.metal, anisotropy: 0.5, normalMap: normals.brushedFine, normalScale: new THREE.Vector2(0.1, 0.1) }), [normals, grimes]);
-  const blackMetal = useMemo(() => new THREE.MeshPhysicalMaterial({ color: '#1d1c1b', metalness: 0.6, roughness: 1, roughnessMap: grimes.plastic, normalMap: normals.powder, normalScale: new THREE.Vector2(0.3, 0.3), clearcoat: 0.15, clearcoatRoughness: 0.5 }), [normals, grimes]);
-  const plastic = useMemo(() => new THREE.MeshPhysicalMaterial({ color: '#161514', metalness: 0, roughness: 1, roughnessMap: grimes.plastic, clearcoat: 0.3, clearcoatRoughness: 0.45 }), [grimes]);
-  const rubber = useMemo(() => new THREE.MeshStandardMaterial({ color: '#0d0d0d', roughness: 0.92, normalMap: normals.rubber, normalScale: new THREE.Vector2(0.3, 0.3) }), [normals]);
-  const platterMats = useMemo(() => [
-    new THREE.MeshStandardMaterial({ map: strobe, metalness: 0.9, roughness: 0.32 }),
-    new THREE.MeshPhysicalMaterial({ color: '#7c7c7a', metalness: 1, roughness: 0.42, anisotropy: 0.7, normalMap: normals.brushed, normalScale: new THREE.Vector2(0.1, 0.1) }),
-    new THREE.MeshStandardMaterial({ color: '#777', metalness: 1, roughness: 0.5 }),
-  ], [strobe, normals]);
-  const matMats = useMemo(() => [rubber, new THREE.MeshStandardMaterial({ map: mat, roughness: 0.9, normalMap: normals.rubber, normalScale: new THREE.Vector2(0.35, 0.35) }), rubber], [mat, rubber, normals]);
-  const recordMats = useMemo(() => {
-    const { cv, ctx } = canvas(256, 256);
-    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 256, 256);
-    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(128, 128, 128 * 0.345, 0, Math.PI * 2); ctx.fill();
-    const face = new THREE.MeshPhysicalMaterial({
-      map: vinyl, roughnessMap: vRough, roughness: 0.85,
-      // Анизотропный блик по бороздкам + тонкий «лак» со следами пальцев и пылью
-      anisotropy: 0.92, anisotropyMap: aniso,
-      clearcoat: 0.4, clearcoatMap: toTexture(cv, { srgb: false }),
-      clearcoatRoughness: 1, clearcoatRoughnessMap: grimes.vinyl,
-    });
-    return [new THREE.MeshStandardMaterial({ color: '#0e0e0e', roughness: 0.32 }), face, face];
-  }, [vinyl, vRough, aniso, grimes]);
+  const {
+    walnut, black, knurlTex, grimes, geo, normals,
+    alu, armTube, aluPolished, aluDark, blackMetal, plastic, rubber, platterMats, matMats,
+  } = getKit();
+  const recordMats = useMemo(() => recordMaterials(project, code), [project, code]);
 
   const record = useRef<THREE.Group>(null);
   const spin = useRef<THREE.Group>(null);
@@ -467,7 +537,6 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
   const armPitch = useRef<THREE.Group>(null);
   const cue = useRef<THREE.Group>(null);
   const led = useRef<THREE.MeshStandardMaterial>(null);
-  const strobeLight = useRef<THREE.PointLight>(null);
 
   const start = useRef<number | null>(null);
   const leaveAt = useRef<number | null>(null);
@@ -539,9 +608,7 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
     if (armYaw.current) armYaw.current.rotation.y = yaw;
     if (armPitch.current) armPitch.current.rotation.x = pitch;
     if (cue.current) cue.current.rotation.x = -0.6 * cueA;
-    const on = Math.min(1, omega.current / RPM[33]);
     if (led.current) led.current.emissiveIntensity = 0.1 + 2.6 * (motor ? 1 : 0);
-    if (strobeLight.current) strobeLight.current.intensity = 0.05 * (0.3 + 0.7 * on);
   });
 
   const busy = () => leaveAt.current !== null;
@@ -588,7 +655,6 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
           <sphereGeometry args={[0.004, 12, 12]} />
           <meshStandardMaterial color="#ff8a3c" emissive="#ff7a2c" emissiveIntensity={1.4} />
         </mesh>
-        <pointLight ref={strobeLight} position={[0.01, 0.02, -0.01]} color="#ff7a30" distance={0.1} decay={2} />
       </group>
 
       {/* Пластинка */}
@@ -712,21 +778,47 @@ function Turntable({ project, code, leaving, onMotor }: Props) {
 }
 
 /** 3D-проигрыватель сверху: половина пластинки у левого края, тонарм и органы управления справа. */
-export default function Player3D(props: Props) {
+/** Компилирует все шейдеры сцены заранее, пока проигрыватель ещё скрыт, — без паузы при первом показе. */
+function Prewarm() {
+  const { gl, scene, camera } = useThree();
+  useEffect(() => {
+    let alive = true;
+    loadHdri().then(() => {
+      // Ждём кадр, чтобы окружение успело примениться, затем собираем все программы шейдеров.
+      requestAnimationFrame(() => {
+        if (!alive) return;
+        try {
+          gl.compile(scene, camera);
+          gl.render(scene, camera);
+        } catch { /* необязательная оптимизация */ }
+      });
+    });
+    return () => { alive = false; };
+  }, [gl, scene, camera]);
+  return null;
+}
+
+/**
+ * 3D-проигрыватель сверху: половина пластинки у левого края, тонарм и органы управления справа.
+ * Canvas живёт всю сессию; при смене пластинки пересоздаётся только сам проигрыватель (по session).
+ */
+export default function Player3D({ session, active, ...props }: StageProps) {
   return (
     <Canvas
       className="player3d"
+      frameloop={active ? 'always' : 'never'}
       shadows={{ type: THREE.VSMShadowMap }}
-      dpr={[1, 2]}
+      dpr={[1, 1.5]}
       camera={{ position: [0.16, 0.56, 0.14], fov: 36, near: 0.01, far: 6 }}
       onCreated={({ camera }) => camera.lookAt(0.16, 0, 0.005)}
-      gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.0 }}
+      gl={{ antialias: true, powerPreference: 'high-performance', toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.0 }}
     >
       <color attach="background" args={['#0d0907']} />
       <fog attach="fog" args={['#0d0907', 1.2, 2.6]} />
       <Lights />
       <Room />
-      <Turntable {...props} />
+      <Turntable key={session} {...props} />
+      <Prewarm />
     </Canvas>
   );
 }

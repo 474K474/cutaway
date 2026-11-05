@@ -1,4 +1,5 @@
 import type { Project } from '../data/projects';
+import { addGrain } from '../util/canvas';
 
 // Рисует постерную обложку на canvas — та же композиция, что и в DOM-компоненте Cover,
 // но в текстуру для 3D. Координаты — в units: 1 unit = 1% стороны обложки.
@@ -157,15 +158,4 @@ export function drawCover(project: Project, code: string, size = 1024): HTMLCanv
   ctx.fillRect(0, 0, size, size);
 
   return cv;
-}
-
-/** Мелкое тёмно-светлое зерно поверх уже нарисованного. */
-export function addGrain(ctx: CanvasRenderingContext2D, size: number, amount: number) {
-  const img = ctx.getImageData(0, 0, size, size);
-  const d = img.data;
-  for (let i = 0; i < d.length; i += 4) {
-    const n = (Math.random() - 0.5) * 255 * amount;
-    d[i] += n; d[i + 1] += n; d[i + 2] += n;
-  }
-  ctx.putImageData(img, 0, 0);
 }

@@ -1,23 +1,11 @@
 import * as THREE from 'three';
-import { addGrain } from './drawCover';
+import { addGrain, makeCanvas, rng } from '../util/canvas';
+
+export { rng };
 
 // Все текстуры генерируются кодом на canvas — без внешних файлов, сайт целиком статичный.
 
-function canvas(w: number, h: number) {
-  const cv = document.createElement('canvas');
-  cv.width = w;
-  cv.height = h;
-  return { cv, ctx: cv.getContext('2d')! };
-}
-
-/** Детерминированный ГПСЧ, чтобы доски выглядели одинаково при каждой загрузке. */
-export function rng(seed: number) {
-  let s = seed >>> 0 || 1;
-  return () => {
-    s ^= s << 13; s ^= s >>> 17; s ^= s << 5;
-    return ((s >>> 0) % 100000) / 100000;
-  };
-}
+const canvas = makeCanvas;
 
 export function toTexture(cv: HTMLCanvasElement, opts: { srgb?: boolean; repeat?: [number, number] } = {}) {
   const t = new THREE.CanvasTexture(cv);
@@ -98,13 +86,13 @@ export function plankTexture(seed: number) {
 /** Паркет из длинных досок с торцевыми стыками вразбежку. */
 export function floorTexture() {
   const rand = rng(4242);
-  const W = 2048, H = 2048, boards = 8, bw = W / boards;
+  const W = 1024, H = 1024, boards = 8, bw = W / boards;
   const { cv, ctx } = canvas(W, H);
   const tones = ['#4a2f1c', '#55371f', '#432a19', '#5a3b22', '#4e321e'];
   for (let b = 0; b < boards; b++) {
-    let y = -rand() * 900;
+    let y = -rand() * 450;
     while (y < H) {
-      const len = 700 + rand() * 900;
+      const len = 350 + rand() * 450;
       const tone = tones[Math.floor(rand() * tones.length)];
       const piece = canvas(Math.ceil(len), bw);
       paintWood(piece.ctx, Math.ceil(len), bw, tone, rand, 40);

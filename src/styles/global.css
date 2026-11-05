@@ -81,8 +81,11 @@ a:hover { color: var(--accent); }
 /* Смена сцен: мягкое проявление и растворение (чуть с масштабом — как будто камера отъезжает) */
 .view-in { animation: view-in .9s cubic-bezier(.22, 1, .36, 1) both; }
 .view-out { animation: view-out .42s cubic-bezier(.5, 0, .75, 0) both; pointer-events: none; }
-@keyframes view-in { from { opacity: 0; transform: scale(1.015); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
-@keyframes view-out { from { opacity: 1; filter: none; } to { opacity: 0; transform: scale(.99); filter: blur(4px); } }
+/* Только opacity — композитор анимирует её без перерисовки 3D-холста */
+@keyframes view-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes view-out { from { opacity: 1; } to { opacity: 0; } }
+/* Скрытый, но живой экран: сохраняет размеры (для 3D-сцены), не виден и не кликается */
+.view-hidden { position: fixed; inset: 0; visibility: hidden; pointer-events: none; z-index: -1; overflow: hidden; }
 /* Смена текста при переборе пластинок */
 .swap { animation: swap .5s cubic-bezier(.22, 1, .36, 1) both; }
 @keyframes swap { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
@@ -95,3 +98,6 @@ a:hover { color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   .r1, .r2, .r3, .r4, .fade-in, .view-in, .view-out, .swap { animation: none; }
 }
+
+/* Киношное зерно: готовая плитка (задаётся в main.tsx), без полноэкранного SVG-фильтра */
+.film-grain { position: absolute; inset: 0; pointer-events: none; z-index: 10; opacity: .05; background-image: var(--grain); background-size: 160px 160px; }

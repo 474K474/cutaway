@@ -61,8 +61,9 @@ export function useLightFlicker() {
 
     // Ждём шрифты (но не дольше 1,5 с), чтобы мерцание не прошло, пока страница ещё не нарисована.
     let started = false;
+    let alive = true;
     const start = () => {
-      if (started) return;
+      if (started || !alive) return;
       started = true;
       play(BOOT, () => {
         setSmooth(true);
@@ -74,7 +75,11 @@ export function useLightFlicker() {
     later(start, 1500);
 
     const list = timers.current;
-    return () => list.forEach((id) => window.clearTimeout(id));
+    return () => {
+      alive = false;
+      list.forEach((id) => window.clearTimeout(id));
+      list.length = 0;
+    };
   }, []);
 
   return { level, smooth };

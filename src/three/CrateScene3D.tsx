@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, MutableRefObject } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { projects, trackCode } from '../data/projects';
-import { drawCover } from './drawCover';
+import { coverCanvas } from './coverCache';
+import { fontsAlreadyReady, waitFonts } from '../util/canvas';
 import {
   beamAlpha, cardboardTexture, decalTexture, dotTexture, floorTexture, plankTexture,
   plasterBump, plasterTexture, rng, toTexture, vinylRoughness, vinylTexture,
@@ -13,6 +14,8 @@ import '../components/CrateScene.css';
 import './CrateScene3D.css';
 
 interface Props {
+  /** Ящик на экране; когда скрыт — сцена не рисуется. */
+  active?: boolean;
   hovered: number;
   pulling: boolean;
   returning: boolean;
@@ -38,18 +41,13 @@ const CRATE_YAW = 0.78;
 // ---------- Общие ресурсы ----------
 
 function useFontsReady() {
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(fontsAlreadyReady);
   useEffect(() => {
+    if (ready) return;
     let alive = true;
-    const done = () => alive && setReady(true);
-    Promise.all([
-      document.fonts?.load('700 100px Oswald'),
-      document.fonts?.load('700 40px Onest'),
-      document.fonts?.load('800 40px Onest'),
-    ]).then(done, done);
-    const t = window.setTimeout(done, 2500);
-    return () => { alive = false; window.clearTimeout(t); };
-  }, []);
+    waitFonts().then(() => alive && setReady(true));
+    return () => { alive = false; };
+  }, [ready]);
   return ready;
 }
 
@@ -59,7 +57,7 @@ const damp = (cur: number, target: number, speed: number, dt: number) =>
 
 // ---------- Свет ----------
 
-function Lights({ level }: { level: number }) {
+function Lights({ levelRef }: { levelRef: MutableRefObject<number> }) {
   const key = useRef<THREE.SpotLight>(null);
   const wash = useRef<THREE.SpotLight>(null);
   const hemi = useRef<THREE.HemisphereLight>(null);
@@ -69,7 +67,9 @@ function Lights({ level }: { level: number }) {
   // Мягкие отражения от процедурной «комнаты» — без загрузки HDR-файлов.
   useEffect(() => {
     const pmrem = new THREE.PMREMGenerator(gl);
-    const env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    const room = new RoomEnvironment();
+    const env = pmrem.fromScene(room, 0.04).texture;
+    room.dispose();
     scene.environment = env;
     return () => { env.dispose(); pmrem.dispose(); };
   }, [gl, scene]);
@@ -80,6 +80,7 @@ function Lights({ level }: { level: number }) {
   }, []);
 
   useFrame(() => {
+    const level = levelRef.current;
     if (key.current) key.current.intensity = 34 * level;
     if (wash.current) wash.current.intensity = 7 * level;
     if (hemi.current) hemi.current.intensity = 0.02 + 0.09 * level;
@@ -97,11 +98,11 @@ function Lights({ level }: { level: number }) {
         decay={2}
         color="#ffb26a"
         castShadow
-        shadow-mapSize={[2048, 2048]}
+        shadow-mapSize={[1024, 1024]}
         shadow-bias={-0.0004}
         shadow-normalBias={0.02}
-        shadow-radius={7}
-        shadow-blurSamples={16}
+        shadow-radius={5}
+        shadow-blurSamples={8}
       />
       <spotLight ref={wash} position={[0, 2.6, 0.2]} angle={0.75} penumbra={1} decay={2} color="#ff9c55" />
       <hemisphereLight ref={hemi} args={['#ffd9ae', '#1a0e06', 0.3]} />
@@ -111,7 +112,7 @@ function Lights({ level }: { level: number }) {
 }
 
 /** Видимый луч света сверху и пылинки в нём. */
-function Beam({ level }: { level: number }) {
+function Beam({ levelRef }: { levelRef: MutableRefObject<number> }) {
   const mat = useRef<THREE.MeshBasicMaterial>(null);
   const dustMat = useRef<THREE.PointsMaterial>(null);
   const pts = useRef<THREE.Points>(null);
@@ -133,6 +134,7 @@ function Beam({ level }: { level: number }) {
   }, []);
 
   useFrame((state, dt) => {
+    const level = levelRef.current;
     if (mat.current) mat.current.opacity = 0.055 * level;
     if (dustMat.current) dustMat.current.opacity = 0.6 * level;
     const g = pts.current?.geometry;
@@ -232,7 +234,7 @@ function Room({ covers }: { covers: HTMLCanvasElement[] | null }) {
           <meshStandardMaterial color="#8a5a33" roughness={0.6} />
         </mesh>
         {spines.map((s, k) => (
-          <mesh key={k} position={[s.x, 0.011 + s.h / 2, 0]} castShadow>
+          <mesh key={k} position={[s.x, 0.011 + s.h / 2, 0]}>
             <boxGeometry args={[s.w, s.h, 0.17]} />
             <meshStandardMaterial color={s.c} roughness={0.7} />
           </mesh>
@@ -450,13 +452,14 @@ function CameraRig({ gone }: { gone: boolean }) {
 
 type Projector = (clientX: number) => { best: number; bestD: number; dists: number[] };
 
-function SceneContent({ hovered, gone, level, projector }: { hovered: number; gone: boolean; level: number; projector: MutableRefObject<Projector | null> }) {
+/** memo: мерцание света меняет только ref — сцена не перерисовывается React-ом 15 раз за интро. */
+const SceneContent = memo(function SceneContent({ hovered, gone, levelRef, projector }: { hovered: number; gone: boolean; levelRef: MutableRefObject<number>; projector: MutableRefObject<Projector | null> }) {
   const fontsReady = useFontsReady();
   const crate = useRef<THREE.Group>(null);
   const { camera, size, gl } = useThree();
 
   const covers = useMemo(
-    () => (fontsReady ? projects.map((p, i) => drawCover(p, trackCode(projects, i), 1024)) : null),
+    () => (fontsReady ? projects.map((p, i) => coverCanvas(p, trackCode(projects, i), 1024)) : null),
     [fontsReady],
   );
   const fronts = useMemo(() => covers?.map((c) => toTexture(c)) ?? null, [covers]);
@@ -491,7 +494,7 @@ function SceneContent({ hovered, gone, level, projector }: { hovered: number; go
       <color attach="background" args={['#0d0907']} />
       <fog attach="fog" args={['#0d0907', 2.4, 5]} />
       <CameraRig gone={gone} />
-      <Lights level={level} />
+      <Lights levelRef={levelRef} />
       <Room covers={covers} />
       <group ref={crate} rotation-y={CRATE_YAW}>
         <Crate />
@@ -500,14 +503,16 @@ function SceneContent({ hovered, gone, level, projector }: { hovered: number; go
           <RecordMesh key={p.id} index={i} hovered={hovered} gone={gone} front={fronts[i]} vinyl={vinyls[i]} vinylRough={vinylRough} card={card} />
         ))}
       </group>
-      <Beam level={level} />
+      <Beam levelRef={levelRef} />
     </>
   );
-}
+});
 
 /** 3D-версия сцены с ящиком: настоящий свет, тени и материалы. */
-export default function CrateScene3D({ hovered, pulling, returning, light, onHover, onPick }: Props) {
+export default function CrateScene3D({ active = true, hovered, pulling, returning, light, onHover, onPick }: Props) {
   const projector = useRef<Projector | null>(null);
+  const levelRef = useRef(light.level);
+  levelRef.current = light.level;
   const gone = pulling || returning;
 
   const onMove = (clientX: number) => {
@@ -529,18 +534,19 @@ export default function CrateScene3D({ hovered, pulling, returning, light, onHov
       onClick={() => hovered >= 0 && onPick(hovered)}
     >
       <Canvas
+        frameloop={active ? 'always' : 'never'}
         shadows={{ type: THREE.VSMShadowMap }}
-        dpr={[1, 1.75]}
+        dpr={[1, 1.5]}
         camera={{ position: [0.02, 0.88, 1.3], fov: 36, near: 0.05, far: 20 }}
         onCreated={({ camera }) => camera.lookAt(0, 0.3, 0)}
-        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }}
+        gl={{ antialias: true, powerPreference: 'high-performance', toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }}
       >
-        <SceneContent hovered={hovered} gone={gone} level={light.level} projector={projector} />
+        <SceneContent hovered={hovered} gone={gone} levelRef={levelRef} projector={projector} />
       </Canvas>
 
       <div className="vignette" aria-hidden="true" />
       <div className="room-dark room-dark-3d" aria-hidden="true" />
-      <svg className="fill-svg film-grain" aria-hidden="true"><rect width="100%" height="100%" filter="url(#filmgrain)" /></svg>
+      <div className="film-grain" aria-hidden="true" />
       <div className="stage-hint">Веди курсором вдоль ящика · клик — достать пластинку</div>
 
       {/* Клавиатурный доступ к пластинкам */}

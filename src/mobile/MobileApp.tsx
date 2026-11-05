@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { projects, trackCode } from '../data/projects';
 import { useLightFlicker } from '../hooks/useLightFlicker';
-import { SvgDefs } from '../components/SvgDefs';
 import { useCoverImages } from './assets';
 import { Stack } from './Stack';
 import { Inspect } from './Inspect';
@@ -31,7 +30,13 @@ export default function MobileApp() {
   const light = useLightFlicker();
 
   const timers = useRef<number[]>([]);
-  const later = useCallback((fn: () => void, ms: number) => { timers.current.push(window.setTimeout(fn, ms)); }, []);
+  const later = useCallback((fn: () => void, ms: number) => {
+    const id = window.setTimeout(() => {
+      timers.current = timers.current.filter((t) => t !== id);
+      fn();
+    }, ms);
+    timers.current.push(id);
+  }, []);
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
   const go = (next: View, delay: number) => {
@@ -66,7 +71,6 @@ export default function MobileApp() {
 
   return (
     <div className="m-root">
-      <SvgDefs />
       <main className={`view-in${exiting ? ' view-out' : ''}`} key={view}>
         {view === 'stack' && (
           <Stack covers={covers} index={index} light={light} pulling={pulling} onIndex={setIndex} onPick={pick} />
@@ -88,7 +92,7 @@ export default function MobileApp() {
           />
         )}
       </main>
-      <svg className="m-grain" aria-hidden="true"><rect width="100%" height="100%" filter="url(#filmgrain)" /></svg>
+      <div className="m-grain" aria-hidden="true" />
     </div>
   );
 }

@@ -1,6 +1,10 @@
 import { StrictMode, Suspense, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles/global.css';
+import { grainDataUrl } from './util/canvas';
+
+// Плитка киношного зерна — один раз на старте.
+document.documentElement.style.setProperty('--grain', `url(${grainDataUrl()})`);
 
 // Телефоны и планшеты получают отдельную, лёгкую версию (без three.js).
 // Принудительно: ?mobile или ?desktop в адресе.
