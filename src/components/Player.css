@@ -173,5 +173,8 @@
 
 /* 3D-дека: canvas на всю колонку */
 .deck-3d { background: #0f0d0c; }
+/* Высота деки не зависит от длины карточки: иначе при смене вкладки канвас меняет размер — рывок и «зум». */
+.player .deck-3d { position: sticky; top: 0; align-self: start; height: 100vh; min-height: 0; }
+@media (max-width: 1100px) { .player .deck-3d { position: relative; height: 560px; } }
 .deck-3d canvas { position: absolute !important; inset: 0; display: block; }
 .deck-3d > div { position: absolute !important; inset: 0; }
