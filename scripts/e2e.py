@@ -146,7 +146,7 @@ class Flow:
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)[:60]
         path = self.shots / f"{self.name}-{len(list(self.shots.glob(self.name + '-*'))):02d}-{safe}.png"
         try:
-            await asyncio.wait_for(self.page.screenshot(path=str(path)), 30 * self.scale)
+            await asyncio.wait_for(self.page.screenshot(path=str(path), timeout=120_000 * self.scale), 120 * self.scale)
         except Exception as e:
             print(f"    (screenshot {path.name} failed: {type(e).__name__})", flush=True)
 
@@ -267,6 +267,8 @@ async def desktop_flow(fl: Flow, base: str, three_d: bool):
     await fl.step("load crate + first title", load, 300)
     if three_d:
         async def gl_ok():
+            # R3F resizes the canvas from its 300x150 default after the first ResizeObserver tick
+            await wait_ms(p, "const c = document.querySelector('.stage3d canvas'); return c && !(c.width === 300 && c.height === 150)", 120 * fl.scale)
             info = await p.evaluate("""() => { const c = document.querySelector('.stage3d canvas');
                 const gl = c && (c.getContext('webgl2') || c.getContext('webgl'));
                 return { w: c ? c.width : 0, h: c ? c.height : 0, gl: !!gl, lost: gl ? gl.isContextLost() : null }; }""")
